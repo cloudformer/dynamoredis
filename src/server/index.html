@@ -181,7 +181,7 @@ dialog .form-grid { grid-template-columns: 1fr; }
 
   <div class="sql-section">
     <div class="section-title">Redis command</div>
-    <textarea id="cmd" placeholder="SET greeting hello &#10;HSET user:1 name alice age 30 &#10;ZADD board 10 alice 20 bob &#10;KEYS user:*"></textarea>
+    <textarea id="cmd" placeholder="one command per line:&#10;SET greeting hello EX 600&#10;HSET user:1 name alice age 30&#10;ZADD board 10 alice 20 bob&#10;KEYS user:*"></textarea>
     <div class="sql-actions">
       <button class="btn btn-primary" id="run">▶ Run</button>
       <span class="hint">⌘/Ctrl+Enter runs</span>
@@ -287,17 +287,19 @@ function show(v){
   return typeof v === 'string' ? JSON.stringify(v) : String(v);
 }
 async function run(){
-  const line = $('#cmd').value.trim();
-  if (!line) return;
-  const t = tokens(line);
-  log(`> ${line}`, 'sql');
-  const t0 = performance.now();
-  try {
-    const d = await api('/api/cmd', {method: 'POST', body: JSON.stringify({cmd: t[0], args: t.slice(1)})});
-    const r = d.result;
-    const text = Array.isArray(r) ? (r.length ? r.map((x, i) => `${i + 1}) ${show(x)}`).join('\n') : '(empty)') : show(r);
-    log(`[${ts()}] ${text}  · ${Math.round(performance.now() - t0)} ms (server ${d.ms} ms, ${d.cu} CU)`, 'ok');
-  } catch (e) { /* api() logged it */ }
+  const lines = $('#cmd').value.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+  if (!lines.length) return;
+  for (const line of lines){            // one command per line, in order, like RedisInsight's workbench
+    const t = tokens(line);
+    log(`> ${line}`, 'sql');
+    const t0 = performance.now();
+    try {
+      const d = await api('/api/cmd', {method: 'POST', body: JSON.stringify({cmd: t[0], args: t.slice(1)})});
+      const r = d.result;
+      const text = Array.isArray(r) ? (r.length ? r.map((x, i) => `${i + 1}) ${show(x)}`).join('\n') : '(empty)') : show(r);
+      log(`[${ts()}] ${text}  · ${Math.round(performance.now() - t0)} ms (server ${d.ms} ms, ${d.cu} CU)`, 'ok');
+    } catch (e) { /* api() logged it */ }
+  }
   $('#cmd').value = '';
   loadKeys(true);
   if (state.selected) loadKey(state.selected);
