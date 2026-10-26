@@ -128,11 +128,18 @@ COMPAT_DRY=1 python3 -m pytest tests/compat -q -s                  # 不用 Dock
 `MULTI` / `EXEC` / `WATCH`（`pipeline(transaction=True)`）、streams、`CONFIG` / `CLIENT` / 复制 / 集群。
 这些都需要一个保持连接和会话的服务器，这里没有。
 
+**需要知道的：**
+- 过期时间精度是秒：`PX` / `PEXPIRE` 向上取整到秒，`PTTL` 返回秒数 × 1000。
+- `KEYS`、`SCAN`、`DBSIZE`、`FLUSHDB` 要扫整张表：表大的时候，每次调用的读取费用和表的大小成正比。
+- 两个客户端同时修改同一个 key：输掉竞争的那条命令自动重新执行；key 一直在变的话，重试 3 次后放弃，抛
+  `ResponseError("ERR concurrent modification of key '…', retried 3 times")`——绝不静默覆盖。
+
 ## 保证
 
 | | 靠什么 |
 |---|---|
-| **原子性** | 一条命令 = 一次带条件表达式的 DynamoDB 操作；计数、push、集合增删都是服务端的 `ADD` / `list_append` / `DELETE` |
+| **原子性** | 一条命令 = 一次带条件表达式的 DynamoDB 操作；计数、push、集合增删都是服务端的 `ADD` / `list_append` / `DELETE`；`RENAME` 是一个事务 |
+| **不丢写入** | 先读后写的命令（`LPOP`、`LTRIM`、`HDEL`、`APPEND` …）只在 key 仍是读到的样子时才写；否则重新执行（重试 3 次，之后报错）。写入绝不会落到刚过期的 key 上 |
 | **持久性** | DynamoDB 提交（多 AZ）之后客户端才拿到回复 |
 | **隔离性** | 按 key，和 Redis 一样；没有跨 key 事务（`MULTI` 拒绝，见 TASKS.md task 1） |
 | **过期** | 每次读都检查 `exp`，过期的 key 立刻不可见；DynamoDB TTL 几小时内回收 item |

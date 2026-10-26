@@ -133,11 +133,20 @@ COMPAT_DRY=1 python3 -m pytest tests/compat -q -s                  # no Docker: 
 Lua / functions, `MULTI` / `EXEC` / `WATCH` (`pipeline(transaction=True)`), streams, `CONFIG` / `CLIENT` /
 replication / cluster. They need a server that holds connections and sessions; there is none here.
 
+**Worth knowing:**
+- Expiry has one-second precision: `PX` / `PEXPIRE` round up to the next second, `PTTL` is the TTL in seconds × 1000.
+- `KEYS`, `SCAN`, `DBSIZE` and `FLUSHDB` scan the whole table: on a large table each call costs read
+  capacity in proportion to the table's size.
+- Two clients changing the same key at the same moment: the command that lost the race runs again
+  automatically; if the key keeps changing it gives up after 3 retries with
+  `ResponseError("ERR concurrent modification of key '…', retried 3 times")` — never a silent overwrite.
+
 ## Guarantees
 
 | | How |
 |---|---|
-| **Atomicity** | one command = one DynamoDB operation with a condition expression; counters, pushes and set changes are server-side `ADD` / `list_append` / `DELETE` |
+| **Atomicity** | one command = one DynamoDB operation with a condition expression; counters, pushes and set changes are server-side `ADD` / `list_append` / `DELETE`; `RENAME` is one transaction |
+| **No lost writes** | a command that reads first (`LPOP`, `LTRIM`, `HDEL`, `APPEND`, …) writes only if the key is still what it read; otherwise it runs again (3 retries, then an error). A write never lands in a key that has just expired |
 | **Durability** | the client gets the reply after DynamoDB has committed (multi-AZ) |
 | **Isolation** | per key, as in Redis; no cross-key transactions (`MULTI` is refused, see TASKS.md task 1) |
 | **Expiry** | `exp` is checked on every read, so an expired key is gone at once; DynamoDB TTL reclaims the item within hours |

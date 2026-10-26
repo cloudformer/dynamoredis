@@ -1,10 +1,10 @@
 # dynamoredis compatibility report · [tasks](TASKS.md)
 
-Generated 2026-10-25 by `pytest tests` · dynamoredis 0.1.0 · Python 3.9.6
+Generated 2026-10-26 by `pytest tests` · dynamoredis 0.1.1 · Python 3.9.6
 
 Each row is one feature exercised the same way on the reference and on the project; results, types and errors must match. The feature list only grows (a removed case would show in git), so the support percentage can only move up.
 
-Whole test run: **37 passed**, 0 failed, 0 expected failures (known gaps), 0 skipped — regression suite (`tests/`) and compatibility suite (`tests/compat/`) together.
+Whole test run: **58 passed**, 0 failed, 0 expected failures (known gaps), 0 skipped — regression suite (`tests/`) and compatibility suite (`tests/compat/`) together.
 
 Open tasks: none — see [TASKS.md](TASKS.md).
 
