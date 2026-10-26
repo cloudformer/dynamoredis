@@ -10,7 +10,7 @@
 
 | | ElastiCache Serverless (Redis) | dynamoredis |
 |---|---|---|
-| Idle cost / month | ~$90 (minimum data + ECPU) | ≈ $0 |
+| Idle cost / month | ~$90 — billed per GB-hour with a 1 GB minimum ($0.125 × 24 × 30), ECPUs on top | ≈ $0 |
 | Endpoint | host:6379, RESP protocol, VPC | Lambda Function URL, HTTPS, anywhere |
 | Storage | memory on nodes | one DynamoDB table (pay per request, TTL, multi-AZ, durable) |
 | Client | `import redis` | `from dynamoredis import redis` |
@@ -20,7 +20,7 @@
 ## Why
 
 Most Redis use is a cache, a few counters, sessions, a small queue — bursts of activity and long idle
-stretches, for which ElastiCache still charges every hour. DynamoDB already is a serverless key-value store
+stretches, for which ElastiCache Serverless still charges every hour for at least 1 GB (≈ $90 a month before a single request). DynamoDB already is a serverless key-value store
 with atomic counters, sets, lists and TTL; what is missing is the Redis API. dynamoredis adds it: a Lambda
 translates redis commands into DynamoDB calls, the driver speaks redis-py.
 
@@ -65,6 +65,27 @@ Open `console_url` in a browser, sign in with `user` / `password`. Keys by prefi
 value on the right by type (string, hash, list, set, sorted set) with its TTL, a command line on top —
 `SET greeting hello`, `HGETALL user:1`, `ZADD board 10 alice`. Every call shows the server time and the
 DynamoDB capacity units it consumed.
+
+Paste this into the command box to get a small dataset to click around (one command per line; `FLUSHDB` clears it):
+
+```
+HSET user:tom name Tom age 31 city Boston
+HSET user:mary name Mary age 28 city Seattle
+HSET user:alice name Alice age 30 city Austin
+SET user:tom:last_login 2026-10-26T05:00:00Z
+INCR user:tom:visits
+SADD user:tom:roles admin editor
+ZADD user:leaderboard 120 tom 95 mary 150 alice
+RPUSH user:tom:inbox "hello tom" "meeting at 3"
+SET config:feature:dark_mode on
+SETEX session:abc123 3600 tom
+INCR counter:pageviews
+LPUSH jobs:pending job-1 job-2
+```
+
+Then look at the DynamoDB table in the AWS console: one item per key — `t` is the type, `v` the value
+(hash = Map, list = List, set = String Set, sorted set = Map of member → score, counters = Number),
+`session:abc123` carries `exp`.
 
 ### 3. Connect from code
 

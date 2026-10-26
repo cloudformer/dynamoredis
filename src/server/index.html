@@ -163,17 +163,18 @@ td input {
 dialog {
   border: none; border-radius: 10px; padding: 25px;
   box-shadow: 0 20px 60px rgba(0,0,0,.3); min-width: 340px; max-width: 90vw;
+  position: fixed; inset: 0; margin: auto;   /* centred in the viewport, whatever the page scroll */
 }
 dialog::backdrop { background: rgba(0,0,0,.4); }
 dialog h3 { margin-bottom: 15px; color: #1f2937; font-size: 17px; }
 dialog .form-grid { grid-template-columns: 1fr; }
 @media (max-width: 640px){ .container { padding: 20px; } body { padding: 16px; } }
 #keys{border:1px solid #dfe3e8;border-radius:8px;overflow:hidden;background:#fff}
-#keys .row{display:flex;align-items:center;gap:8px;height:40px;padding-right:14px;border-bottom:1px solid #eef0f3;cursor:pointer;font-size:14px;color:#2a3344;white-space:nowrap}
+#keys .row{display:flex;align-items:center;gap:6px;height:30px;padding-right:10px;border-bottom:1px solid #eef0f3;cursor:pointer;font-size:12.5px;color:#2a3344;white-space:nowrap}
 #keys .row:hover{background:#f5f7fa} #keys .row.sel{background:#e9f0fb}
-#keys .chev{width:12px;color:#6b7482;font-size:16px;line-height:1} #keys .ico{display:flex;color:#5b6b85}
-#keys .name{flex:1;overflow:hidden;text-overflow:ellipsis} #keys .pct{width:48px;text-align:right;color:#6b7482}
-#keys .num{width:56px;text-align:right;color:#2a3344} #keys .key .name{font-family:Menlo,monospace;font-size:13px}
+#keys .chev{width:10px;color:#6b7482;font-size:13px;line-height:1} #keys .ico{display:flex;color:#5b6b85}
+#keys .name{flex:1;overflow:hidden;text-overflow:ellipsis} #keys .pct{width:40px;text-align:right;color:#6b7482;font-size:11.5px}
+#keys .num{width:48px;text-align:right;color:#2a3344;font-size:11.5px} #keys .key .name{font-family:Menlo,monospace;font-size:12px}
 #detail .empty{color:#6b7482;text-align:center;padding:80px 20px;border:1px solid #dfe3e8;border-radius:8px;background:#fff}
 pre{white-space:pre-wrap;word-break:break-all}
 </style>
@@ -329,8 +330,8 @@ function tree(keys){
   return root;
 }
 function count(node){ return node.keys.length + Object.values(node.children).reduce((n, c) => n + count(c), 0); }
-const FOLDER = '<svg width="16" height="14" viewBox="0 0 16 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M1.5 3.5h4l1.5 1.5h7.5v7h-13z"/></svg>';
-const KEYICON = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="5" cy="5" r="3"/><path d="M7.2 7.2 12.5 12.5M10 10l1.5-1.5M11.5 11.5 13 10"/></svg>';
+const FOLDER = '<svg width="14" height="12" viewBox="0 0 16 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M1.5 3.5h4l1.5 1.5h7.5v7h-13z"/></svg>';
+const KEYICON = '<svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="5" cy="5" r="3"/><path d="M7.2 7.2 12.5 12.5M10 10l1.5-1.5M11.5 11.5 13 10"/></svg>';
 function renderNode(node, prefix, depth, total){
   let html = '';
   for (const name of Object.keys(node.children).sort()){

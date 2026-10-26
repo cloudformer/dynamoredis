@@ -9,7 +9,7 @@
 
 | | ElastiCache Serverless (Redis) | dynamoredis |
 |---|---|---|
-| 空闲费用 / 月 | ~$90（最低数据量 + ECPU） | ≈ $0 |
+| 空闲费用 / 月 | ~$90——按 GB·小时计费，最低按 1 GB 算（$0.125 × 24 × 30），ECPU 另计 | ≈ $0 |
 | 端点 | host:6379，RESP 协议，要进 VPC | Lambda Function URL，HTTPS，哪里都能连 |
 | 存储 | 节点内存 | 一张 DynamoDB 表（按请求计费、TTL、多 AZ、持久） |
 | 客户端 | `import redis` | `from dynamoredis import redis` |
@@ -18,7 +18,7 @@
 
 ## 为什么
 
-大部分 Redis 用法是缓存、几个计数器、会话、小队列——一阵忙一阵闲，闲着 ElastiCache 照样每小时收钱。
+大部分 Redis 用法是缓存、几个计数器、会话、小队列——一阵忙一阵闲，闲着 ElastiCache Serverless 照样按最低 1 GB 每小时收钱（一个请求没有也 ≈ $90/月）。
 DynamoDB 本身就是 serverless 的 KV 库，自带原子计数、集合、列表和 TTL，缺的只是 Redis 的 API。
 dynamoredis 补上它：一个 Lambda 把 redis 命令翻译成 DynamoDB 调用，驱动说的是 redis-py。
 
@@ -61,6 +61,26 @@ Function URL 的 Lambda、一个最小权限 IAM role。
 浏览器打开 `console_url`，用 `user` / `password` 登录。左边按前缀列 key（SCAN），右边按类型展示值（string、hash、
 list、set、zset）和 TTL，上面是命令行——`SET greeting hello`、`HGETALL user:1`、`ZADD board 10 alice`。
 每次调用显示服务端耗时和消耗的 DynamoDB 容量单位。
+
+把下面这段粘进命令框，就有一份可以点着看的示例数据（一行一条；`FLUSHDB` 清空）：
+
+```
+HSET user:tom name Tom age 31 city Boston
+HSET user:mary name Mary age 28 city Seattle
+HSET user:alice name Alice age 30 city Austin
+SET user:tom:last_login 2026-10-26T05:00:00Z
+INCR user:tom:visits
+SADD user:tom:roles admin editor
+ZADD user:leaderboard 120 tom 95 mary 150 alice
+RPUSH user:tom:inbox "hello tom" "meeting at 3"
+SET config:feature:dark_mode on
+SETEX session:abc123 3600 tom
+INCR counter:pageviews
+LPUSH jobs:pending job-1 job-2
+```
+
+再去 AWS 控制台看 DynamoDB 表：一个 key 一条 item——`t` 是类型，`v` 是值（hash = Map、list = List、
+set = String Set、zset = Map(member → score)、计数器 = Number），`session:abc123` 带 `exp`。
 
 ### 3. 程序连接
 
