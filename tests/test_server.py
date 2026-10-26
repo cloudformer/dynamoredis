@@ -295,3 +295,11 @@ def test_flushdb_keeps_a_key_written_after_the_scan(table, monkeypatch):
     interleave(table, monkeypatch, ("SET", "a", "2"), ("SET", "b", "2"))
     assert cmd("FLUSHDB")[1]["result"] is True
     assert cmd("MGET", "a", "b")[1]["result"] == ["2", "2"]
+
+
+def test_dbsize_counts_live_keys_like_keys(table, monkeypatch):
+    move = clock(monkeypatch)
+    cmd("SET", "a", "1")
+    cmd("SET", "b", "1", "EX", 10)
+    move(11)                                                # b expired, DynamoDB's TTL sweep has not run yet
+    assert cmd("DBSIZE")[1]["result"] == 1 == len(cmd("KEYS", "*")[1]["result"])

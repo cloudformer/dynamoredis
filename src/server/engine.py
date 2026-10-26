@@ -438,7 +438,9 @@ class Engine:
         return [nxt, keys]
 
     def cmd_dbsize(self):
-        n, kw = 0, {"Select": "COUNT", "ReturnConsumedCapacity": "TOTAL"}
+        # live keys only, like KEYS: an expired item waits for DynamoDB's TTL sweep but no longer counts
+        n, kw = 0, {"Select": "COUNT", "ReturnConsumedCapacity": "TOTAL", "FilterExpression": LIVE,
+                    "ExpressionAttributeValues": {":now": _now()}}
         while True:
             r = self._count(self.table.scan(**kw))
             n += r["Count"]
