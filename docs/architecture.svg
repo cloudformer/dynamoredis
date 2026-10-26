@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 360" width="1100" height="360"
+     font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <!-- template: three boxes. Replace the labels; add boxes for every AWS primitive the project uses. -->
+  <defs>
+    <linearGradient id="gCompute" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F58534"/><stop offset="1" stop-color="#C7511F"/>
+    </linearGradient>
+    <linearGradient id="gStore" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3F8624"/><stop offset="1" stop-color="#1D6B1D"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#555"/>
+    </marker>
+  </defs>
+  <rect width="1100" height="360" fill="#ffffff"/>
+  <text x="550" y="42" text-anchor="middle" font-size="22" font-weight="600" fill="#222">&lt;project&gt; — a truly serverless &lt;replaces&gt;</text>
+
+  <!-- client -->
+  <rect x="60" y="120" width="260" height="120" rx="12" fill="#f4f6f8" stroke="#c9d1d9"/>
+  <text x="190" y="165" text-anchor="middle" font-size="16" font-weight="600" fill="#222">your code</text>
+  <text x="190" y="192" text-anchor="middle" font-size="13" fill="#555" font-family="Menlo, monospace">from &lt;project&gt; import &lt;client&gt;</text>
+  <text x="190" y="214" text-anchor="middle" font-size="12" fill="#777">pip package · pure client</text>
+
+  <!-- compute -->
+  <rect x="420" y="120" width="260" height="120" rx="12" fill="url(#gCompute)"/>
+  <text x="550" y="165" text-anchor="middle" font-size="16" font-weight="600" fill="#fff">Lambda Function URL</text>
+  <text x="550" y="192" text-anchor="middle" font-size="13" fill="#fff">HTTP Basic auth · JSON API</text>
+  <text x="550" y="214" text-anchor="middle" font-size="12" fill="#ffe">web console at /</text>
+
+  <!-- storage -->
+  <rect x="780" y="120" width="260" height="120" rx="12" fill="url(#gStore)"/>
+  <text x="910" y="165" text-anchor="middle" font-size="16" font-weight="600" fill="#fff">&lt;built on&gt;</text>
+  <text x="910" y="192" text-anchor="middle" font-size="13" fill="#fff">&lt;what it holds&gt;</text>
+  <text x="910" y="214" text-anchor="middle" font-size="12" fill="#efe">≈ $0 when idle</text>
+
+  <line x1="320" y1="180" x2="412" y2="180" stroke="#555" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="680" y1="180" x2="772" y2="180" stroke="#555" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <text x="550" y="310" text-anchor="middle" font-size="13" fill="#777">Part of Redefine AWS Serverless · github.com/topics/redefine-aws-serverless</text>
+</svg>
