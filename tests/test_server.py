@@ -137,3 +137,64 @@ def test_expired_cleanup_keeps_a_concurrent_set(table, monkeypatch):
     interleave(table, monkeypatch, ("SET", "k", "new"))     # lands after GET saw the expired item
     assert cmd("GET", "k")[1]["result"] == "new"
     assert cmd("GET", "k")[1]["result"] == "new"
+
+
+def test_getdel_is_one_atomic_delete(table, monkeypatch):
+    cmd("SET", "k", "old")
+    interleave(table, monkeypatch, ("SET", "k", "new"))
+    got = cmd("GETDEL", "k")[1]["result"]
+    assert "new" in (got, cmd("GET", "k")[1]["result"])     # the other client's value is returned or kept   # every value written is returned or kept
+    cmd("HSET", "h", "f", "v")
+    assert cmd("GETDEL", "h")[1]["error"].startswith("WRONGTYPE") and cmd("HLEN", "h")[1]["result"] == 1
+
+
+def test_removing_the_last_member_keeps_a_concurrent_add(table, monkeypatch):
+    cmd("HSET", "h", "a", "1")
+    cmd("SADD", "s", "a")
+    cmd("ZADD", "z", 1, "a")
+    interleave(table, monkeypatch, ("HSET", "h", "b", "2"), ("SADD", "s", "b"), ("ZADD", "z", 2, "b"))
+    assert cmd("HDEL", "h", "a")[1]["result"] == 1
+    assert cmd("SREM", "s", "a")[1]["result"] == 1
+    assert cmd("ZREM", "z", "a")[1]["result"] == 1
+    assert cmd("HGETALL", "h")[1]["result"] == {"b": "2"}
+    assert cmd("SMEMBERS", "s")[1]["result"] == ["b"]
+    assert cmd("ZRANGE", "z", 0, -1)[1]["result"] == ["b"]
+
+
+def test_pop_keeps_a_concurrent_push(table, monkeypatch):
+    cmd("RPUSH", "l", "a")
+    cmd("RPUSH", "r", "a")
+    interleave(table, monkeypatch, ("RPUSH", "l", "b"), ("LPUSH", "r", "b"))
+    assert cmd("LPOP", "l")[1]["result"] == "a" and cmd("LRANGE", "l", 0, -1)[1]["result"] == ["b"]
+    assert cmd("RPOP", "r")[1]["result"] == "a" and cmd("LRANGE", "r", 0, -1)[1]["result"] == ["b"]
+
+
+def test_pop_is_not_fooled_by_an_unchanged_length(table, monkeypatch):
+    cmd("RPUSH", "l", "a", "b", "c")
+    interleave(table, monkeypatch, ("LPOP", "l"), ("RPUSH", "l", "d"))   # same length, different list
+    assert cmd("LPOP", "l")[1]["result"] == "b"             # "a" went to the other client, never twice
+    assert cmd("LRANGE", "l", 0, -1)[1]["result"] == ["c", "d"]
+
+
+def test_ltrim_keeps_a_concurrent_push(table, monkeypatch):
+    cmd("RPUSH", "l", "a", "b", "c")
+    interleave(table, monkeypatch, ("RPUSH", "l", "d"))
+    assert cmd("LTRIM", "l", 1, -1)[1]["result"] is True
+    assert cmd("LRANGE", "l", 0, -1)[1]["result"] == ["b", "c", "d"]
+
+
+def test_rename_moves_the_latest_value_in_one_transaction(table, monkeypatch):
+    cmd("SET", "a", "1", "EX", 100)
+    interleave(table, monkeypatch, ("SET", "a", "2"))
+    assert cmd("RENAME", "a", "b")[1]["result"] is True
+    assert cmd("GET", "b")[1]["result"] == "2" and cmd("EXISTS", "a")[1]["result"] == 0
+    assert cmd("TTL", "b")[1]["result"] == -1               # the value written last had no TTL
+    assert cmd("RENAME", "b", "b")[1]["result"] is True and cmd("GET", "b")[1]["result"] == "2"
+
+
+def test_gives_up_with_a_clear_error_after_retries(table, monkeypatch):
+    cmd("RPUSH", "l", "a")
+    interleave(table, monkeypatch, ("RPUSH", "l", "x"), every=True)   # the list changes before every attempt
+    status, data = cmd("LPOP", "l")
+    assert status == 400 and data["error"] == "ERR concurrent modification of key 'l', retried 3 times"
+    assert cmd("LRANGE", "l", 0, -1)[1]["result"] == ["a", "x", "x", "x", "x"]   # nothing popped, nothing lost

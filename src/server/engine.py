@@ -243,10 +243,16 @@ class Engine:
         return None if item is None else _out(item["v"])
 
     def cmd_getdel(self, key):
-        v = self.cmd_get(key)
-        if v is not None:
-            self._delete(key)
-        return v
+        # one atomic delete; a live item of another type fails the condition and stays
+        now = _now()
+        try:
+            r = self._write(self.table.delete_item, key, Key={"k": key}, ReturnValues="ALL_OLD",
+                            ConditionExpression="attribute_not_exists(k) OR t = :t OR exp <= :now",
+                            ExpressionAttributeValues={":t": "string", ":now": now})
+        except _Conflict:
+            raise ResponseError(WRONGTYPE) from None
+        old = r.get("Attributes")
+        return None if not old or ("exp" in old and old["exp"] <= now) else _out(old["v"])
 
     def cmd_getset(self, key, value):
         old = self.cmd_get(key)
@@ -353,9 +359,20 @@ class Engine:
         item = self._get(src)
         if item is None:
             raise ResponseError("ERR no such key")
-        item = dict(item, k=dst)
-        self._count(self.table.put_item(Item=item, ReturnConsumedCapacity="TOTAL"))
-        self._delete(src)
+        if src == dst:
+            return True
+        # one transaction: dst is written and src deleted together, src only if unchanged since the read
+        cond, vals = _same(item)
+        try:   # the resource's client takes plain Python values, like the Table methods
+            self._count(self.db.meta.client.transact_write_items(ReturnConsumedCapacity="TOTAL", TransactItems=[
+                {"Put": {"TableName": self.table_name, "Item": dict(item, k=dst)}},
+                {"Delete": {"TableName": self.table_name, "Key": {"k": src}, "ConditionExpression": cond,
+                            "ExpressionAttributeValues": vals}}]))
+        except ClientError as e:
+            reasons = {r.get("Code") for r in e.response.get("CancellationReasons", [])}
+            if e.response["Error"]["Code"] == "TransactionConflictException" or reasons & {"ConditionalCheckFailed", "TransactionConflict"}:
+                raise _Conflict(src) from None
+            raise
         return True
 
     def cmd_keys(self, pattern="*"):
@@ -467,12 +484,13 @@ class Engine:
         return 1 if field in self._fields(self._typed(key, "hash")) else 0
 
     def cmd_hdel(self, key, *fields):
-        f = self._fields(self._typed(key, "hash"))
+        item = self._typed(key, "hash")
+        f = self._fields(item)
         gone = [x for x in fields if x in f]
         if not gone:
             return 0
         if len(gone) == len(f):
-            self._delete(key)           # Redis removes an empty hash
+            self._delete(key, *_same(item))   # Redis removes an empty hash; only if no field was added meanwhile
             return len(gone)
         names = {f"#f{i}": x for i, x in enumerate(gone)}
         self._update(key, "REMOVE " + ", ".join(f"v.#f{i}" for i in range(len(gone))), names=names,
@@ -529,12 +547,13 @@ class Engine:
             return None if count is None else None
         n = 1 if count is None else _int_arg(count)
         taken = lst[:n] if left else lst[-n:][::-1]
+        # both branches only if the list is still what was read: a concurrent push or pop -> run again
+        cond, cv = _same(item)
         if n >= len(lst):
-            self._delete(key)
+            self._delete(key, cond, cv)
         else:
             idx = range(n) if left else range(len(lst) - n, len(lst))
-            self._update(key, "REMOVE " + ", ".join(f"v[{i}]" for i in idx), cond="t = :t AND size(v) = :n",
-                         cond_values={":t": "list", ":n": len(lst)})
+            self._update(key, "REMOVE " + ", ".join(f"v[{i}]" for i in idx), cond=cond, cond_values=cv)
         out = [_out(v) for v in taken]
         return out[0] if count is None else out
 
@@ -572,14 +591,21 @@ class Engine:
         return True
 
     def cmd_ltrim(self, key, start, stop):
-        lst = self._list(self._typed(key, "list"))
+        item = self._typed(key, "list")
+        lst = self._list(item)
         if not lst:
             return True
-        keep = self.cmd_lrange(key, start, stop)
+        start, stop = _int_arg(start), _int_arg(stop)
+        n = len(lst)
+        start = max(start + n, 0) if start < 0 else start
+        stop = stop + n if stop < 0 else min(stop, n - 1)
+        keep = lst[start:stop + 1] if start <= stop else []
+        # overwrite or delete only if the list is still what was read: a concurrent push is never dropped
+        cond, cv = _same(item)
         if not keep:
-            self._delete(key)
+            self._delete(key, cond, cv)
         else:
-            self._update(key, "SET v = :v", {":v": [_in(x) for x in keep]}, cond="t = :t", cond_values={":t": "list"})
+            self._update(key, "SET v = :v", {":v": keep}, cond=cond, cond_values=cv)
         return True
 
     # ---------------- sets ----------------
@@ -598,12 +624,13 @@ class Engine:
         return len(new)
 
     def cmd_srem(self, key, *members):
-        have = self._set(self._typed(key, "set"))
+        item = self._typed(key, "set")
+        have = self._set(item)
         gone = {str(m) for m in members} & have
         if not gone:
             return 0
         if gone == have:
-            self._delete(key)
+            self._delete(key, *_same(item))   # only if no member was added meanwhile
         else:
             self._update(key, "DELETE v :m", {":m": gone}, cond="t = :t", cond_values={":t": "set"})
         return len(gone)
@@ -671,12 +698,13 @@ class Engine:
         return len(self._fields(self._typed(key, "zset")))
 
     def cmd_zrem(self, key, *members):
-        f = self._fields(self._typed(key, "zset"))
+        item = self._typed(key, "zset")
+        f = self._fields(item)
         gone = [str(m) for m in members if str(m) in f]
         if not gone:
             return 0
         if len(gone) == len(f):
-            self._delete(key)
+            self._delete(key, *_same(item))   # only if no member was added meanwhile
         else:
             names = {f"#m{i}": m for i, m in enumerate(gone)}
             self._update(key, "REMOVE " + ", ".join(f"v.#m{i}" for i in range(len(gone))), names=names,
