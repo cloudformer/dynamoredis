@@ -1,40 +1,40 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 360" width="1100" height="360"
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 400" width="1100" height="400"
      font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
-  <!-- template: three boxes. Replace the labels; add boxes for every AWS primitive the project uses. -->
   <defs>
     <linearGradient id="gCompute" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#F58534"/><stop offset="1" stop-color="#C7511F"/>
     </linearGradient>
     <linearGradient id="gStore" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#3F8624"/><stop offset="1" stop-color="#1D6B1D"/>
+      <stop offset="0" stop-color="#3B48CC"/><stop offset="1" stop-color="#2E3A9E"/>
     </linearGradient>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
       <path d="M0,0 L10,5 L0,10 z" fill="#555"/>
     </marker>
   </defs>
-  <rect width="1100" height="360" fill="#ffffff"/>
-  <text x="550" y="42" text-anchor="middle" font-size="22" font-weight="600" fill="#222">&lt;project&gt; — a truly serverless &lt;replaces&gt;</text>
+  <rect width="1100" height="400" fill="#ffffff"/>
+  <text x="550" y="42" text-anchor="middle" font-size="22" font-weight="600" fill="#222">dynamoredis — a truly serverless Redis</text>
 
-  <!-- client -->
-  <rect x="60" y="120" width="260" height="120" rx="12" fill="#f4f6f8" stroke="#c9d1d9"/>
-  <text x="190" y="165" text-anchor="middle" font-size="16" font-weight="600" fill="#222">your code</text>
-  <text x="190" y="192" text-anchor="middle" font-size="13" fill="#555" font-family="Menlo, monospace">from &lt;project&gt; import &lt;client&gt;</text>
-  <text x="190" y="214" text-anchor="middle" font-size="12" fill="#777">pip package · pure client</text>
+  <rect x="60" y="120" width="260" height="130" rx="12" fill="#f4f6f8" stroke="#c9d1d9"/>
+  <text x="190" y="162" text-anchor="middle" font-size="16" font-weight="600" fill="#222">your code</text>
+  <text x="190" y="190" text-anchor="middle" font-size="13" fill="#555" font-family="Menlo, monospace">from dynamoredis import redis</text>
+  <text x="190" y="212" text-anchor="middle" font-size="12" fill="#777">redis-py API · standard library only</text>
+  <text x="190" y="232" text-anchor="middle" font-size="12" fill="#777">or a browser: the console</text>
 
-  <!-- compute -->
-  <rect x="420" y="120" width="260" height="120" rx="12" fill="url(#gCompute)"/>
-  <text x="550" y="165" text-anchor="middle" font-size="16" font-weight="600" fill="#fff">Lambda Function URL</text>
-  <text x="550" y="192" text-anchor="middle" font-size="13" fill="#fff">HTTP Basic auth · JSON API</text>
-  <text x="550" y="214" text-anchor="middle" font-size="12" fill="#ffe">web console at /</text>
+  <rect x="420" y="120" width="260" height="130" rx="12" fill="url(#gCompute)"/>
+  <text x="550" y="162" text-anchor="middle" font-size="16" font-weight="600" fill="#fff">Lambda Function URL</text>
+  <text x="550" y="190" text-anchor="middle" font-size="13" fill="#fff">HTTPS · Basic auth = user / password</text>
+  <text x="550" y="212" text-anchor="middle" font-size="12" fill="#ffe">redis command → DynamoDB call</text>
+  <text x="550" y="232" text-anchor="middle" font-size="12" fill="#ffe">GET / = RedisInsight-style console</text>
 
-  <!-- storage -->
-  <rect x="780" y="120" width="260" height="120" rx="12" fill="url(#gStore)"/>
-  <text x="910" y="165" text-anchor="middle" font-size="16" font-weight="600" fill="#fff">&lt;built on&gt;</text>
-  <text x="910" y="192" text-anchor="middle" font-size="13" fill="#fff">&lt;what it holds&gt;</text>
-  <text x="910" y="214" text-anchor="middle" font-size="12" fill="#efe">≈ $0 when idle</text>
+  <rect x="780" y="120" width="260" height="130" rx="12" fill="url(#gStore)"/>
+  <text x="910" y="162" text-anchor="middle" font-size="16" font-weight="600" fill="#fff">DynamoDB · one table</text>
+  <text x="910" y="190" text-anchor="middle" font-size="13" fill="#fff">k · type · value · exp (TTL)</text>
+  <text x="910" y="212" text-anchor="middle" font-size="12" fill="#eef">INCR = ADD · LPUSH = list_append</text>
+  <text x="910" y="232" text-anchor="middle" font-size="12" fill="#eef">pay per request · durable · multi-AZ</text>
 
-  <line x1="320" y1="180" x2="412" y2="180" stroke="#555" stroke-width="2" marker-end="url(#arrow)"/>
-  <line x1="680" y1="180" x2="772" y2="180" stroke="#555" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="320" y1="185" x2="412" y2="185" stroke="#555" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="680" y1="185" x2="772" y2="185" stroke="#555" stroke-width="2" marker-end="url(#arrow)"/>
 
-  <text x="550" y="310" text-anchor="middle" font-size="13" fill="#777">Part of Redefine AWS Serverless · github.com/topics/redefine-aws-serverless</text>
+  <text x="550" y="310" text-anchor="middle" font-size="14" fill="#333">Idle: no instance, no node, no hourly charge — ≈ $0. Busy: per-request Lambda + DynamoDB pricing.</text>
+  <text x="550" y="350" text-anchor="middle" font-size="13" fill="#777">Part of Redefine AWS Serverless · github.com/topics/redefine-aws-serverless</text>
 </svg>

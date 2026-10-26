@@ -1,31 +1,99 @@
-"""The server Lambda, called in-process: auth, routing, errors, timing."""
+"""The server Lambda called in-process against a mocked DynamoDB: auth, routing, the engine's guarantees."""
 import base64
 import json
+import time
 
 import lambda_function as lf
 
 AUTH = "Basic " + base64.b64encode(b"admin:pw").decode()
 
 
-def call(method, path, body=None, auth=AUTH):
+def call(method, path, body=None, auth=AUTH, qs=None):
     event = {"requestContext": {"http": {"method": method}}, "rawPath": path,
-             "headers": {"authorization": auth} if auth else {}, "body": json.dumps(body) if body else None}
+             "headers": {"authorization": auth} if auth else {}, "body": json.dumps(body) if body else None,
+             "queryStringParameters": qs}
     resp = lf.lambda_handler(event, None)
-    return resp["statusCode"], json.loads(resp["body"]) if resp["headers"]["content-type"].startswith("application/json") else resp["body"]
+    ct = resp["headers"]["content-type"]
+    return resp["statusCode"], json.loads(resp["body"]) if ct.startswith("application/json") else resp["body"]
 
 
-def test_console_is_public_and_api_needs_auth():
+def cmd(c, *args):
+    return call("POST", "/api/cmd", {"cmd": c, "args": list(args)})
+
+
+def test_console_is_public_and_api_needs_auth(table):
     status, body = call("GET", "/", auth=None)
     assert status == 200 and "<html" in body
-    assert call("GET", "/api/ping", auth=None)[0] == 401
-    assert call("GET", "/api/ping", auth="Basic " + base64.b64encode(b"admin:wrong").decode())[0] == 401
+    assert cmd("PING")[0] == 200
+    assert call("POST", "/api/cmd", {"cmd": "PING", "args": []}, auth=None)[0] == 401
 
 
-def test_routes_errors_and_timing():
-    status, data = call("GET", "/api/ping")
-    assert status == 200 and data["ok"] is True and isinstance(data["ms"], float)
-    assert call("GET", "/api/nope")[0] == 404
-    status, data = call("POST", "/api/items", {"name": "bad name!"})
-    assert status == 400 and "name" in data["error"]
-    status, data = call("POST", "/api/items", {"name": "ok"})
-    assert status == 201 and data["item"] == {"name": "ok"}
+def test_strings_and_atomic_counters(table):
+    assert cmd("SET", "k", "v")[1]["result"] is True
+    assert cmd("GET", "k")[1]["result"] == "v"
+    assert cmd("GET", "nope")[1]["result"] is None
+    assert cmd("INCR", "n")[1]["result"] == 1
+    assert cmd("INCRBY", "n", 41)[1]["result"] == 42
+    assert cmd("GET", "n")[1]["result"] == "42"            # numbers read back as Redis strings
+    status, data = cmd("INCR", "k")
+    assert status == 400 and data["kind"] == "ResponseError" and "not an integer" in data["error"]
+    assert cmd("SET", "k", "x", "NX")[1]["result"] is None  # NX on an existing key
+    assert cmd("SET", "new", "x", "XX")[1]["result"] is None
+    assert cmd("SETNX", "k2", "1")[1]["result"] == 1 and cmd("SETNX", "k2", "2")[1]["result"] == 0
+
+
+def test_expiry_is_honoured_on_read(table, monkeypatch):
+    cmd("SET", "k", "v", "EX", 10)
+    assert 0 < cmd("TTL", "k")[1]["result"] <= 10
+    monkeypatch.setattr("engine._now", lambda: int(time.time()) + 11)
+    assert cmd("GET", "k")[1]["result"] is None             # expired: gone before DynamoDB's TTL sweep
+    assert cmd("EXISTS", "k")[1]["result"] == 0
+
+
+def test_wrongtype_is_refused(table):
+    cmd("SET", "s", "v")
+    status, data = cmd("HSET", "s", "f", "v")
+    assert status == 400 and data["error"].startswith("WRONGTYPE")
+    status, data = cmd("LPUSH", "s", "v")
+    assert status == 400 and data["error"].startswith("WRONGTYPE")
+
+
+def test_hash_list_set_zset(table):
+    assert cmd("HSET", "h", "a", "1", "b", "x")[1]["result"] == 2
+    assert cmd("HSET", "h", "a", "2")[1]["result"] == 0
+    assert cmd("HINCRBY", "h", "a", 5)[1]["result"] == 7
+    assert cmd("HGETALL", "h")[1]["result"] == {"a": "7", "b": "x"}
+    assert cmd("HDEL", "h", "a", "b")[1]["result"] == 2 and cmd("EXISTS", "h")[1]["result"] == 0
+    assert cmd("LPUSH", "l", "a", "b")[1]["result"] == 2 and cmd("RPUSH", "l", "c")[1]["result"] == 3
+    assert cmd("LRANGE", "l", 0, -1)[1]["result"] == ["b", "a", "c"]
+    assert cmd("LPOP", "l")[1]["result"] == "b" and cmd("RPOP", "l")[1]["result"] == "c"
+    assert cmd("SADD", "s", "x", "y", "x")[1]["result"] == 2 and cmd("SISMEMBER", "s", "y")[1]["result"] == 1
+    assert cmd("SREM", "s", "x", "y")[1]["result"] == 2 and cmd("TYPE", "s")[1]["result"] == "none"
+    assert cmd("ZADD", "z", 10, "a", 5, "b")[1]["result"] == 2
+    assert cmd("ZRANGE", "z", 0, -1, "WITHSCORES")[1]["result"] == [["b", "5"], ["a", "10"]]
+    assert cmd("ZINCRBY", "z", 2.5, "b")[1]["result"] == "7.5"
+
+
+def test_keys_scan_pipeline_and_console_routes(table):
+    for i in range(5):
+        cmd("SET", f"user:{i}", i)
+    cmd("SET", "other", "x")
+    assert cmd("KEYS", "user:*")[1]["result"] == [f"user:{i}" for i in range(5)]
+    assert cmd("DBSIZE")[1]["result"] == 6
+    status, data = call("POST", "/api/pipeline", {"cmds": [["SET", "p", "1"], ["INCR", "p"], ["INCR", "other"], ["GET", "p"]]})
+    assert status == 200
+    assert data["results"][0] == {"result": True} and data["results"][1] == {"result": 2}
+    assert data["results"][2]["kind"] == "ResponseError" and data["results"][3] == {"result": "2"}
+    status, data = call("GET", "/api/keys", qs={"match": "user:*"})
+    assert status == 200 and len(data["keys"]) == 5
+    status, data = call("GET", "/api/key/user:1")
+    assert status == 200 and data["type"] == "string" and data["value"] == "1" and data["ttl"] == -1
+    assert call("GET", "/api/key/nope")[0] == 404
+
+
+def test_unsupported_commands_are_refused(table):
+    for c in ("SUBSCRIBE", "BLPOP", "EVAL", "MULTI", "XADD", "WATCH"):
+        status, data = cmd(c, "x")
+        assert status == 400 and data["kind"] == "NotSupportedError", c
+    status, data = cmd("NOPE", "x")
+    assert status == 400 and data["kind"] == "NotSupportedError"

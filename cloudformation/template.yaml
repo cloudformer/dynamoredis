@@ -1,12 +1,12 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  <project> - a truly serverless <replaces>: Lambda Function URL endpoint + console, <built on>,
+  dynamoredis - a truly serverless Redis: Lambda Function URL endpoint + console, one DynamoDB table,
   ~$0 when idle. Same resources as terraform/main.tf.
 
 # Deploy (AWS CLI only):
 #   aws cloudformation package --template-file cloudformation/template.yaml \
-#       --s3-bucket <any-bucket-you-own> --output-template-file /tmp/<project>.yaml
-#   aws cloudformation deploy --template-file /tmp/<project>.yaml --stack-name <project> \
+#       --s3-bucket <any-bucket-you-own> --output-template-file /tmp/dynamoredis.yaml
+#   aws cloudformation deploy --template-file /tmp/dynamoredis.yaml --stack-name dynamoredis \
 #       --capabilities CAPABILITY_IAM --parameter-overrides file://cloudformation/params.json
 
 Parameters:
@@ -16,7 +16,7 @@ Parameters:
   UserName:
     Type: String
     Default: admin
-    Description: The service's user (HTTP Basic)
+    Description: The service's user (HTTP Basic; redis-py username=)
   Password:
     Type: String
     NoEcho: true
@@ -35,7 +35,18 @@ Conditions:
   PublicEndpoint: !Equals [!Ref EndpointAuth, NONE]
 
 Resources:
-  # ---------------- the project's AWS primitive(s) go here ----------------
+  Table:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-${Env}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: k, AttributeType: S }
+      KeySchema:
+        - { AttributeName: k, KeyType: HASH }
+      TimeToLiveSpecification:
+        AttributeName: exp
+        Enabled: true
 
   LambdaRole:
     Type: AWS::IAM::Role
@@ -54,9 +65,10 @@ Resources:
               - Effect: Allow
                 Action: [logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents]
                 Resource: arn:aws:logs:*:*:*
-              # - Effect: Allow
-              #   Action: [dynamodb:GetItem, ...]
-              #   Resource: !GetAtt Table.Arn
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:DeleteItem,
+                         dynamodb:BatchWriteItem, dynamodb:BatchGetItem, dynamodb:Scan, dynamodb:Query]
+                Resource: !GetAtt Table.Arn
 
   Server:
     Type: AWS::Lambda::Function
@@ -70,6 +82,7 @@ Resources:
       Code: ../src/server
       Environment:
         Variables:
+          TABLE: !Ref Table
           USER_NAME: !Ref UserName
           PASSWORD: !Ref Password
           CONSOLE: !Ref Console
@@ -105,3 +118,5 @@ Resources:
 Outputs:
   ConsoleUrl:
     Value: !GetAtt ServerUrl.FunctionUrl
+  Table:
+    Value: !Ref Table

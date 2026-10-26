@@ -8,7 +8,7 @@ jobs:
   publish:
     uses: cloudformer/redefine-aws-serverless-workflow/.github/workflows/reusable-publish.yml@main
     with:
-      install: "pytest boto3 redis"
+      install: "pytest boto3 moto redis"
       compose-service: "redis"
       test-env: "REDIS_URL=redis://127.0.0.1:6379/0"
     secrets: inherit

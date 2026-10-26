@@ -4,7 +4,7 @@
   "assume_role_arn": "",
 
   "env": "dev",
-  "name": "<project>",
+  "name": "dynamoredis",
 
   "user": "admin",
   "password": "CHANGE-ME",

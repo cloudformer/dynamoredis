@@ -13,15 +13,15 @@ import platform
 import re
 
 CONFIG = {
-    "title": "<project> compatibility report",
+    "title": "dynamoredis compatibility report",
     "report": os.path.join(os.path.dirname(__file__), "compat", "REPORT.md"),
     # (key, section title, substring of the test file name, reference description or callable)
     "suites": [
-        ("reference", "<project>.<client> vs <replaces>", "test_reference",
-         lambda: versions.get("reference") or "<replaces> (not run)"),
+        ("redis", "dynamoredis.redis vs Redis", "test_redis",
+         lambda: versions.get("reference") or "Redis (not run)"),
     ],
     "version": lambda: os.environ["PACKAGE"] + " " + __import__(os.environ["PACKAGE"]).__version__,
-    "categories": ["Basics", "Data", "Queries", "Errors", "Metadata", "Unsupported", "General"],
+    "categories": ["Strings", "Keys", "Hashes", "Lists", "Sets", "Sorted sets", "Pipeline", "Errors", "Unsupported", "General"],
 }
 
 features = {}   # nodeid -> {"suite", "feature", "gap", "unsupported", "quirk", "fail"}

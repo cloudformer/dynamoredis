@@ -3,29 +3,30 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "dynamoredis"           # <project>: repo = pip = import name
+name = "dynamoredis"
 version = "0.1.0"
-description = "A truly serverless <replaces> on your own AWS account: <built on>, ≈ $0 when idle. Client named after the standard one: <project>.<client>."
+description = "A truly serverless Redis on your own AWS account: Lambda URL endpoint, DynamoDB storage, ≈ $0 when idle. redis-py API: from dynamoredis import redis."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "Frank Zhang" }]
-keywords = ["serverless", "aws", "lambda", "<replaces>"]
+keywords = ["serverless", "aws", "lambda", "dynamodb", "redis", "cache", "key-value"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
   "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
+  "Topic :: Database",
 ]
 dependencies = []  # standard library only
 
 [project.urls]
-Homepage = "https://github.com/cloudformer/<project>"
-Repository = "https://github.com/cloudformer/<project>"
-Deploy = "https://github.com/cloudformer/<project>#quick-start"
-Compatibility = "https://github.com/cloudformer/<project>/blob/main/tests/compat/REPORT.md"
-Changelog = "https://github.com/cloudformer/<project>/blob/main/CHANGELOG.md"
-Issues = "https://github.com/cloudformer/<project>/issues"
+Homepage = "https://github.com/cloudformer/dynamoredis"
+Repository = "https://github.com/cloudformer/dynamoredis"
+Deploy = "https://github.com/cloudformer/dynamoredis#quick-start"
+Compatibility = "https://github.com/cloudformer/dynamoredis/blob/main/tests/compat/REPORT.md"
+Changelog = "https://github.com/cloudformer/dynamoredis/blob/main/CHANGELOG.md"
+Issues = "https://github.com/cloudformer/dynamoredis/issues"
 
 [tool.setuptools]
-packages = ["dynamoredis"]     # rename the directory client/project/ to client/<project>/
+packages = ["dynamoredis"]

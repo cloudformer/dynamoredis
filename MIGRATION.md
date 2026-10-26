@@ -1,12 +1,15 @@
-# Moving to <replaces>
+# Moving to Redis / ElastiCache
 
-<project> is for the long tail: small, idle most of the time, ≈ $0. When you outgrow it, the real service
-is one import line away.
+dynamoredis is for the long tail: caches, counters, sessions, small queues that sit idle most of the time.
+When you need pub/sub, blocking queues, Lua, transactions or sub-millisecond latency, a real Redis is one
+import line away.
 
-1. Create the real <replaces> (<how>).
-2. Copy the data: <how — export command / console action>.
-3. Change the import: `from <project> import <client>` → `import <client>`; the connection parameters are the
-   same shape (<host, user, password, ...>).
-4. Delete the stack: `terraform -chdir=terraform destroy -var-file=my.json`.
+1. Create the Redis: ElastiCache Serverless (or Valkey), or any Redis 7.
+2. Copy the data: the console shows every key; for more than a few hundred keys run a small script with
+   `scan_iter()` on dynamoredis and `restore`-free writes (`set` / `hset` / `rpush` / `sadd` / `zadd`) on the
+   new server. Values are plain Redis strings, nothing to convert.
+3. Change the import: `from dynamoredis import redis` → `import redis`. `Redis(host=, username=, password=)`
+   keeps the same shape; drop `pipeline(transaction=False)` back to the default if you like.
+4. Delete the stack: `terraform -chdir=terraform destroy -var-file=my.json` (the table goes with it).
 
-What you gain: <sessions / locks / ORM support / scale>. What you lose: the ≈ $0 idle bill.
+What you gain: pub/sub, `BLPOP`, Lua, `MULTI`/`EXEC`, latency in microseconds. What you lose: the ≈ $0 idle bill.

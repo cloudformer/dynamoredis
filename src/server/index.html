@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>&lt;project&gt; console</title>
+<title>dynamoredis console</title>
 <style>
 /* 风格参考 Automation_Delivery_EaC 的 db 页面 */
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -168,20 +168,20 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 dialog h3 { margin-bottom: 15px; color: #1f2937; font-size: 17px; }
 dialog .form-grid { grid-template-columns: 1fr; }
 @media (max-width: 640px){ .container { padding: 20px; } body { padding: 16px; } }
+#keys td.key{cursor:pointer} #keys tr.sel td{background:#eef3ff} pre{white-space:pre-wrap;word-break:break-all}
 </style>
 </head>
 <body>
 <div class="container">
-  <h1>⚡ &lt;project&gt; console</h1>
+  <h1>⚡ dynamoredis console</h1>
   <div class="db-info">
     <span class="meta"><span class="k">Endpoint</span><span class="chip" id="info-host">-</span></span>
     <button class="btn btn-ghost btn-small" id="logout">sign out</button>
   </div>
 
-  <!-- template: the command box. Every project has one: SQL, redis commands, a DAG trigger, a message... -->
   <div class="sql-section">
-    <div class="section-title">Command</div>
-    <textarea id="cmd" placeholder="e.g. ping"></textarea>
+    <div class="section-title">Redis command</div>
+    <textarea id="cmd" placeholder="SET greeting hello &#10;HSET user:1 name alice age 30 &#10;ZADD board 10 alice 20 bob &#10;KEYS user:*"></textarea>
     <div class="sql-actions">
       <button class="btn btn-primary" id="run">▶ Run</button>
       <span class="hint">⌘/Ctrl+Enter runs</span>
@@ -191,8 +191,16 @@ dialog .form-grid { grid-template-columns: 1fr; }
     <div class="log" id="log"></div>
   </div>
 
-  <!-- template: the project's views (lists, tables, detail panes) render into #main -->
-  <div id="main"></div>
+  <div class="controls">
+    <label>keys</label><input id="match" placeholder="prefix* (SCAN MATCH)" style="flex:1;max-width:320px">
+    <button class="btn btn-secondary" id="refresh">↻ refresh</button>
+    <button class="btn btn-ghost" id="more" hidden>more…</button>
+    <span class="hint" id="count"></span>
+  </div>
+  <div id="main" style="display:grid;grid-template-columns:minmax(220px,1fr) 2fr;gap:16px">
+    <div id="keys"></div>
+    <div id="detail"><div class="hint">pick a key</div></div>
+  </div>
 </div>
 
 <dialog id="dlg">
@@ -209,7 +217,7 @@ dialog .form-grid { grid-template-columns: 1fr; }
 <script>
 // ---------------- shared shell: credentials, dialog, log, api() ----------------
 const $ = s => document.querySelector(s);
-const KEY = '<project>_';                       // localStorage prefix: only the credential is kept
+const KEY = 'dynamoredis_';                       // localStorage prefix: only the credential is kept
 const store = {
   get: k => { try { return localStorage.getItem(KEY + k); } catch(e){ return null; } },
   set: (k, v) => { try { v == null ? localStorage.removeItem(KEY + k) : localStorage.setItem(KEY + k, v); } catch(e){} },
@@ -263,25 +271,79 @@ async function api(path, opts = {}){
 }
 $('#logout').onclick = () => { saveCred(''); location.reload(); };
 
-// ---------------- the project's part: run a command, render views into #main ----------------
+// ---------------- dynamoredis: command box, key browser, key detail ----------------
+const state = {match: '', cursor: '0', keys: [], selected: null};
+
+// "SET k v" -> ["SET", "k", "v"]; quotes group words
+function tokens(line){
+  const out = []; const re = /"([^"]*)"|'([^']*)'|(\S+)/g; let m;
+  while ((m = re.exec(line))) out.push(m[1] ?? m[2] ?? m[3]);
+  return out;
+}
+function show(v){
+  if (v === null) return '(nil)';
+  if (v === true) return 'OK';
+  if (typeof v === 'object' && !Array.isArray(v)) return v.$b ? `<binary ${v.$b.length} b64>` : JSON.stringify(v);
+  return typeof v === 'string' ? JSON.stringify(v) : String(v);
+}
 async function run(){
-  const cmd = $('#cmd').value.trim();
-  if (!cmd) return;
-  log(`> ${cmd}`, 'sql');
+  const line = $('#cmd').value.trim();
+  if (!line) return;
+  const t = tokens(line);
+  log(`> ${line}`, 'sql');
   const t0 = performance.now();
-  const data = await api('/api/' + cmd);                      // example: "ping" -> GET /api/ping
-  log(`[${ts()}] ${JSON.stringify(data)} (${Math.round(performance.now() - t0)} ms, server ${data.ms} ms)`, 'ok');
-  render();
+  try {
+    const d = await api('/api/cmd', {method: 'POST', body: JSON.stringify({cmd: t[0], args: t.slice(1)})});
+    const r = d.result;
+    const text = Array.isArray(r) ? (r.length ? r.map((x, i) => `${i + 1}) ${show(x)}`).join('\n') : '(empty)') : show(r);
+    log(`[${ts()}] ${text}  · ${Math.round(performance.now() - t0)} ms (server ${d.ms} ms, ${d.cu} CU)`, 'ok');
+  } catch (e) { /* api() logged it */ }
+  $('#cmd').value = '';
+  loadKeys(true);
+  if (state.selected) loadKey(state.selected);
 }
 $('#run').onclick = run;
 $('#cmd').addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') run(); });
 
-async function render(){
-  const data = await api('/api/items');
-  $('#main').innerHTML = `<div class="section-title">Items</div><table><tr><th>name</th></tr>` +
-    data.items.map(i => `<tr><td>${esc(i.name)}</td></tr>`).join('') + `</table>`;
+async function loadKeys(reset){
+  if (reset){ state.cursor = '0'; state.keys = []; }
+  const q = new URLSearchParams({match: state.match ? state.match + (state.match.endsWith('*') ? '' : '*') : '*', cursor: state.cursor, count: 100});
+  const d = await api('/api/keys?' + q);
+  state.keys = state.keys.concat(d.keys); state.cursor = d.cursor;
+  $('#more').hidden = state.cursor === '0';
+  $('#count').textContent = `${state.keys.length} keys · ${d.cu} CU`;
+  $('#keys').innerHTML = `<table>` + (state.keys.length ? state.keys.map(k =>
+    `<tr class="${k === state.selected ? 'sel' : ''}"><td class="key" data-k="${esc(k)}">${esc(k)}</td></tr>`).join('') :
+    `<tr><td class="hint">no keys</td></tr>`) + `</table>`;
+  document.querySelectorAll('#keys td.key').forEach(td => td.onclick = () => loadKey(td.dataset.k));
 }
-render().catch(() => {});
+$('#refresh').onclick = () => loadKeys(true);
+$('#more').onclick = () => loadKeys(false);
+$('#match').addEventListener('input', e => { state.match = e.target.value.trim(); loadKeys(true); });
+
+function ttlText(t){ return t === -1 ? 'no expiry' : t === -2 ? 'gone' : `expires in ${t}s`; }
+async function loadKey(k){
+  state.selected = k;
+  let d;
+  try { d = await api('/api/key/' + encodeURIComponent(k)); }
+  catch (e) { $('#detail').innerHTML = `<div class="hint">${esc(k)}: gone</div>`; loadKeys(true); return; }
+  const v = d.value;
+  let body;
+  if (d.type === 'string') body = `<pre>${esc(show(v))}</pre>`;
+  else if (d.type === 'hash') body = `<table><tr><th>field</th><th>value</th></tr>` + Object.entries(v).map(([f, x]) => `<tr><td>${esc(f)}</td><td>${esc(show(x))}</td></tr>`).join('') + `</table>`;
+  else if (d.type === 'list') body = `<table><tr><th>#</th><th>value</th></tr>` + v.map((x, i) => `<tr><td>${i}</td><td>${esc(show(x))}</td></tr>`).join('') + `</table>`;
+  else if (d.type === 'set') body = `<table><tr><th>member</th></tr>` + v.map(x => `<tr><td>${esc(show(x))}</td></tr>`).join('') + `</table>`;
+  else body = `<table><tr><th>member</th><th>score</th></tr>` + v.map(([m, s]) => `<tr><td>${esc(m)}</td><td>${esc(s)}</td></tr>`).join('') + `</table>`;
+  $('#detail').innerHTML = `<div class="section-title">${esc(k)} <span class="chip">${d.type}</span> <span class="hint">${ttlText(d.ttl)} · ${d.cu} CU</span>
+      <button class="btn btn-ghost btn-small" id="del">delete</button></div>` + body;
+  $('#del').onclick = async () => {
+    if (!(await dialog(`Delete ${k}?`, []))) return;
+    await api('/api/cmd', {method: 'POST', body: JSON.stringify({cmd: 'DEL', args: [k]})});
+    log(`[${ts()}] DEL ${k}`, 'ok'); state.selected = null; $('#detail').innerHTML = '<div class="hint">pick a key</div>'; loadKeys(true);
+  };
+  loadKeys(true);
+}
+loadKeys(true).catch(() => {});
 </script>
 </body>
 </html>

@@ -2,9 +2,22 @@ locals {
   role = "${var.name}-lambda-role"
 }
 
-# ---------------- the project's AWS primitive(s) go here ----------------
-# e.g. aws_s3_bucket, aws_dynamodb_table, aws_sqs_queue ... and the IAM statements that allow the
-# Lambda to use them (add to the policy below).
+# ---------------- DynamoDB: one table, pay per request, TTL on `exp` ----------------
+resource "aws_dynamodb_table" "kv" {
+  name         = "${var.name}-${var.env}"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "k"
+
+  attribute {
+    name = "k"
+    type = "S"
+  }
+
+  ttl {
+    attribute_name = "exp"
+    enabled        = true
+  }
+}
 
 # ---------------- IAM: one role, least privilege ----------------
 resource "aws_iam_role" "lambda" {
@@ -30,7 +43,12 @@ resource "aws_iam_role_policy" "lambda" {
         Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
         Resource = "arn:aws:logs:*:*:*"
       },
-      # { Effect = "Allow", Action = ["dynamodb:GetItem", ...], Resource = aws_dynamodb_table.x.arn },
+      {
+        Effect = "Allow"
+        Action = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:DeleteItem",
+                  "dynamodb:BatchWriteItem", "dynamodb:BatchGetItem", "dynamodb:Scan", "dynamodb:Query"]
+        Resource = aws_dynamodb_table.kv.arn
+      }
     ]
   })
 }
@@ -55,6 +73,7 @@ resource "aws_lambda_function" "server" {
 
   environment {
     variables = {
+      TABLE     = aws_dynamodb_table.kv.name
       USER_NAME = var.user
       PASSWORD  = var.password
       CONSOLE   = var.console ? "1" : "0"

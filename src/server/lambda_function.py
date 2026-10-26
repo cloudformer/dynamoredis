@@ -1,12 +1,14 @@
-"""<project> server: one Lambda behind a Function URL — JSON API for the driver, web console at GET /.
+"""dynamoredis server: one Lambda behind a Function URL — Redis commands over HTTP for the driver, a
+RedisInsight-style console at GET /. Data lives in one DynamoDB table (engine.py).
 
-Template. The first half (JSON, request body, HTTP Basic auth, routing, error mapping, timing) is the
-same in every project of the series; replace the routes in the second half.
+    GET  /                       console (index.html)
+    POST /api/cmd                {"cmd": "SET", "args": ["k", "v"]}        -> {"result": ..., "cu": 1.0, "ms": ...}
+    POST /api/pipeline           {"cmds": [["SET","k","v"], ["GET","k"]]}  -> {"results": [{"result"} | {"error"}, ...]}
+    GET  /api/keys?match=&cursor=&count=   console: a page of keys
+    GET  /api/key/{key}          console: type, ttl, value
 
-    GET  /                      console (index.html)
-    GET  /api/ping              {"ok": true}
-    GET  /api/items             example list
-    POST /api/items             example create {name}
+Errors: a Redis error reply is 400 {"error": "WRONGTYPE ...", "kind": "ResponseError"}; an unsupported
+command is 400 with kind "NotSupportedError"; everything else 500.
 """
 import base64
 import hmac
@@ -14,22 +16,29 @@ import json
 import os
 import re
 import time
+import urllib.parse
+
+from engine import UNSUPPORTED, Engine, NotSupported, ResponseError
 
 USER = os.environ.get("USER_NAME", "")
 PASSWORD = os.environ.get("PASSWORD", "")
 CONSOLE = os.environ.get("CONSOLE", "1") == "1"
+TABLE = os.environ.get("TABLE", "dynamoredis")
 
 with open(os.path.join(os.path.dirname(__file__), "index.html"), encoding="utf-8") as f:
     INDEX_HTML = f.read()
 
-NAME = r"[A-Za-z0-9_-]{1,64}"   # the pattern for names in paths
+_engine = None
+
+
+def engine():
+    global _engine
+    if _engine is None:
+        _engine = Engine(TABLE)
+    return _engine
 
 
 class BadRequest(Exception):
-    pass
-
-
-class Forbidden(Exception):
     pass
 
 
@@ -41,7 +50,6 @@ def _json(status, data):
 
 
 def _body(event):
-    """The JSON request body; 400 when it is not a JSON object."""
     raw = event.get("body") or "{}"
     try:
         if event.get("isBase64Encoded"):
@@ -55,7 +63,6 @@ def _body(event):
 
 
 def _authed(event):
-    """HTTP Basic, constant-time compare. No USER_NAME configured = no auth (do not do that)."""
     if not USER:
         return True
     auth = (event.get("headers") or {}).get("authorization", "")
@@ -66,9 +73,6 @@ def _authed(event):
     except Exception:
         return False
     return hmac.compare_digest(user.encode(), USER.encode()) & hmac.compare_digest(password.encode(), PASSWORD.encode())
-
-
-ERRORS = [(BadRequest, 400), (Forbidden, 403)]   # exception class -> HTTP status; add the project's own
 
 
 def lambda_handler(event, context):
@@ -87,36 +91,77 @@ def lambda_handler(event, context):
                 out = handler(event, **match.groupdict())
                 status, data = out if isinstance(out, tuple) else (200, out)
                 break
-    except Exception as e:  # noqa: BLE001 - every error becomes a JSON response
-        status = next((s for cls, s in ERRORS if isinstance(e, cls)), 500)
-        data = {"error": str(e) if status < 500 else f"{type(e).__name__}: {e}"}
+    except BadRequest as e:
+        status, data = 400, {"error": str(e)}
+    except ResponseError as e:
+        status, data = 400, {"error": str(e), "kind": "ResponseError"}
+    except NotSupported as e:
+        status, data = 400, {"error": f"{e} is not supported: {UNSUPPORTED.get(str(e), 'not implemented')}", "kind": "NotSupportedError"}
+    except Exception as e:  # noqa: BLE001
+        status, data = 500, {"error": f"{type(e).__name__}: {e}"}
     data.setdefault("ms", round((time.perf_counter() - t0) * 1000, 1))
     return _json(status, data)
 
 
-# ---------------- the project's API ----------------
+# ---------------- the API ----------------
 
-_ITEMS = []   # example state; a real project talks to its AWS primitive here
+def _run(cmd, args):
+    if not isinstance(cmd, str) or not isinstance(args, list):
+        raise BadRequest("cmd must be a string and args a list")
+    if cmd.upper() in UNSUPPORTED:
+        raise NotSupported(cmd.upper())
+    e = engine()
+    result = e.run(cmd, args)
+    return {"result": result, "cu": round(e.cu, 1)}
 
 
-def ping(event):
-    return {"ok": True}
+def cmd(event):
+    body = _body(event)
+    return _run(body.get("cmd", ""), body.get("args", []))
 
 
-def list_items(event):
-    return {"items": _ITEMS}
+def pipeline(event):
+    cmds = _body(event).get("cmds")
+    if not isinstance(cmds, list) or not cmds:
+        raise BadRequest("cmds must be a non-empty list of [cmd, arg, ...]")
+    results, cu = [], 0.0
+    for c in cmds:
+        if not isinstance(c, list) or not c:
+            raise BadRequest("each command is [cmd, arg, ...]")
+        try:
+            r = _run(c[0], c[1:])
+            cu += r["cu"]
+            results.append({"result": r["result"]})
+        except ResponseError as err:
+            results.append({"error": str(err), "kind": "ResponseError"})
+        except NotSupported as err:
+            results.append({"error": f"{err} is not supported", "kind": "NotSupportedError"})
+    return {"results": results, "cu": round(cu, 1)}
 
 
-def create_item(event):
-    name = _body(event).get("name")
-    if not name or not re.fullmatch(NAME, name):
-        raise BadRequest("name must match " + NAME)
-    _ITEMS.append({"name": name})
-    return 201, {"item": {"name": name}}
+def keys(event):
+    qs = event.get("queryStringParameters") or {}
+    e = engine()
+    cursor, found = e.run("scan", [qs.get("cursor", "0"), "MATCH", qs.get("match") or "*", "COUNT", qs.get("count", "100")])
+    return {"keys": found, "cursor": cursor, "cu": round(e.cu, 1)}
+
+
+def key(event, key):
+    key = urllib.parse.unquote(key)
+    e = engine()
+    t = e.run("type", [key])
+    if t == "none":
+        return 404, {"error": "no such key"}
+    ttl = e.run("ttl", [key])
+    value = {"string": lambda: e.run("get", [key]), "hash": lambda: e.run("hgetall", [key]),
+             "list": lambda: e.run("lrange", [key, 0, -1]), "set": lambda: e.run("smembers", [key]),
+             "zset": lambda: e.run("zrange", [key, 0, -1, "WITHSCORES"])}[t]()
+    return {"key": key, "type": t, "ttl": ttl, "value": value, "cu": round(e.cu, 1)}
 
 
 ROUTES = [
-    ("GET",  re.compile(r"/api/ping$"), ping),
-    ("GET",  re.compile(r"/api/items$"), list_items),
-    ("POST", re.compile(r"/api/items$"), create_item),
+    ("POST", re.compile(r"/api/cmd$"), cmd),
+    ("POST", re.compile(r"/api/pipeline$"), pipeline),
+    ("GET",  re.compile(r"/api/keys$"), keys),
+    ("GET",  re.compile(r"/api/key/(?P<key>[^/]+)$"), key),
 ]

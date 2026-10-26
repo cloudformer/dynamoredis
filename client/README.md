@@ -1,19 +1,30 @@
-# <project>
+# dynamoredis
 
-**Python client for [<project>](https://github.com/cloudformer/<project>) — a truly serverless <replaces>:
-<built on>, a Lambda Function URL as the endpoint, ≈ $0 when idle.** Part of
-[Redefine AWS Serverless](https://github.com/topics/redefine-aws-serverless).
+**Python client for [dynamoredis](https://github.com/cloudformer/dynamoredis) — a truly serverless Redis:
+one DynamoDB table, a Lambda Function URL as the endpoint, ≈ $0 when idle.** The redis-py API, standard
+library only. Part of [Redefine AWS Serverless](https://github.com/topics/redefine-aws-serverless).
 
 ```bash
-pip install <project>
+pip install dynamoredis
 ```
 
 ```python
-from <project> import <client>        # later: `import <client>` against the real service, nothing else changes
+from dynamoredis import redis        # later: `import redis` against a real Redis, nothing else changes
 
-<five-line example>
+r = redis.Redis(host="xxx.lambda-url.us-east-2.on.aws", username="admin", password="...")
+r.set("greeting", "hello", ex=60)
+r.get("greeting")                    # b"hello"
+r.incr("hits")                       # atomic (DynamoDB ADD)
+r.hset("user:1", mapping={"name": "alice", "age": 30})
+r.zadd("board", {"alice": 10, "bob": 20}); r.zrange("board", 0, -1, withscores=True)
+with r.pipeline(transaction=False) as p:
+    p.set("a", 1); p.get("a"); p.execute()     # one request
 ```
 
-The endpoint comes from deploying the [main repository](https://github.com/cloudformer/<project>) —
-same as any client needs its service. Compatibility with the real client:
-[REPORT.md](https://github.com/cloudformer/<project>/blob/main/tests/compat/REPORT.md).
+Strings, keys/TTL, hashes, lists, sets, sorted sets, pipelines. Not supported (raises `NotSupportedError`):
+pub/sub, blocking commands, Lua, `MULTI`/`EXEC`/`WATCH`, streams — those need a server that holds
+connections; that is the moment to move to a real Redis.
+
+The endpoint comes from deploying the [main repository](https://github.com/cloudformer/dynamoredis) —
+same as any client needs its server. Compatibility with redis-py against Redis 7:
+[REPORT.md](https://github.com/cloudformer/dynamoredis/blob/main/tests/compat/REPORT.md).
