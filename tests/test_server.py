@@ -4,6 +4,7 @@ import json
 import time
 
 import lambda_function as lf
+from engine import Engine
 
 AUTH = "Basic " + base64.b64encode(b"admin:pw").decode()
 
@@ -97,3 +98,42 @@ def test_unsupported_commands_are_refused(table):
         assert status == 400 and data["kind"] == "NotSupportedError", c
     status, data = cmd("NOPE", "x")
     assert status == 400 and data["kind"] == "NotSupportedError"
+
+
+# ---------------- concurrency: another client writes between our read and our write ----------------
+
+def interleave(eng, monkeypatch, *cmds, every=False, at="write"):
+    """Just before the engine's first write (or every write; at="read": just after its first read), another
+    client runs cmds on the same table: the moment between "read and decide" and "write" where a concurrent
+    change used to be lost. A callable in cmds runs as is (e.g. to move the clock)."""
+    other = Engine(eng.table_name, client=eng.db)
+
+    def run_others():
+        ran.append(1)
+        for c in cmds:
+            c() if callable(c) else other.run(c[0], list(c[1:]))
+
+    def hook(real, after):
+        def call(*args, **kw):
+            if after:
+                r = real(*args, **kw)
+            if every or not ran:
+                run_others()
+            return r if after else real(*args, **kw)
+        return call
+    ran = []
+    if at == "read":   # after the engine has read the item and judged it (live, type, expiry)
+        monkeypatch.setattr(eng, "_get", hook(eng._get, True))
+        return ran
+    for name in ("put_item", "update_item", "delete_item"):
+        monkeypatch.setattr(eng.table, name, hook(getattr(eng.table, name), False))
+    monkeypatch.setattr(eng.db.meta.client, "transact_write_items", hook(eng.db.meta.client.transact_write_items, False))
+    return ran
+
+
+def test_expired_cleanup_keeps_a_concurrent_set(table, monkeypatch):
+    cmd("SET", "k", "old", "EX", 10)
+    monkeypatch.setattr("engine._now", lambda: int(time.time()) + 11)
+    interleave(table, monkeypatch, ("SET", "k", "new"))     # lands after GET saw the expired item
+    assert cmd("GET", "k")[1]["result"] == "new"
+    assert cmd("GET", "k")[1]["result"] == "new"

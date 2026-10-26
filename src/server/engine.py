@@ -7,8 +7,11 @@ Item layout (partition key `k`):
     exp  expiry as epoch seconds; DynamoDB TTL deletes it eventually, reads treat it as gone immediately
 
 Atomicity comes from DynamoDB itself: INCR / HINCRBY / ZINCRBY are ADD, LPUSH / RPUSH are list_append,
-SADD / SREM are set ADD / DELETE, type safety is a ConditionExpression (-> WRONGTYPE). Commands that
-need the previous value for their reply (HSET's "fields added", SADD's "members added", LPOP) read first.
+SADD / SREM are set ADD / DELETE. Commands that need the previous value (LPOP, LTRIM, HDEL of the last field,
+RENAME, ...) read first and then write with a ConditionExpression proving the item is still what they read.
+If another client changed it in between, the condition fails, nothing is written, and run() executes the
+whole command again (re-read, re-decide), at most RETRIES more times; then a clear error. Every update also
+requires the item to be live, so nothing is ever written into an item that has just expired.
 
 Values are strings, as in Redis. Non-UTF-8 bytes travel as {"$b": base64} and are stored as S base64
 with a marker prefix. Every call reports the consumed capacity units (cu) to the caller.
@@ -24,6 +27,9 @@ from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import ClientError
 
 _B = "\x00b64:"   # prefix marking a base64-stored binary value
+RETRIES = 3       # times a command runs again after a concurrent change
+WRONGTYPE = "WRONGTYPE Operation against a key holding the wrong kind of value"
+LIVE = "(attribute_not_exists(exp) OR exp > :now)"
 
 
 class ResponseError(Exception):
@@ -32,6 +38,24 @@ class ResponseError(Exception):
 
 class NotSupported(Exception):
     pass
+
+
+class _Conflict(Exception):
+    """A conditional write found the item changed since it was read; run() executes the command again."""
+
+    def __init__(self, key):
+        super().__init__(key)
+        self.key = key
+
+
+def _same(item):
+    """Condition: the item is still exactly what was read (None: still absent)."""
+    if item is None:
+        return "attribute_not_exists(k)", {}
+    vals = {":st": item["t"], ":sv": item["v"]}
+    if "exp" in item:
+        vals[":se"] = item["exp"]
+    return "t = :st AND v = :sv AND " + ("exp = :se" if "exp" in item else "attribute_not_exists(exp)"), vals
 
 
 def _now():
@@ -93,35 +117,44 @@ class Engine:
             self.cu += cap.get("CapacityUnits", 0)
         return resp
 
+    def _write(self, op, key, **kw):
+        """One DynamoDB write; a failed condition means another client changed the item: _Conflict."""
+        try:
+            return self._count(op(ReturnConsumedCapacity="TOTAL", **kw))
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                raise _Conflict(key) from None
+            raise
+
     def _get(self, key):
         """The live item or None (expired items count as gone and are deleted)."""
         r = self._count(self.table.get_item(Key={"k": key}, ConsistentRead=True, ReturnConsumedCapacity="TOTAL"))
         item = r.get("Item")
         if item and "exp" in item and item["exp"] <= _now():
-            self._delete(key)
+            # only while still expired: a concurrent SET in between makes this a _Conflict, the command re-reads
+            self._delete(key, "exp <= :now", {":now": _now()})
             return None
         return item
 
-    def _delete(self, key):
-        r = self._count(self.table.delete_item(Key={"k": key}, ReturnValues="ALL_OLD", ReturnConsumedCapacity="TOTAL"))
-        return "Attributes" in r
-
-    def _update(self, key, expr, values=None, names=None, cond=None, cond_values=None):
-        kw = {"Key": {"k": key}, "UpdateExpression": expr, "ReturnConsumedCapacity": "TOTAL", "ReturnValues": "ALL_NEW"}
-        vals = dict(values or {}, **(cond_values or {}))
-        if vals:
-            kw["ExpressionAttributeValues"] = vals
-        if names:
-            kw["ExpressionAttributeNames"] = names
+    def _delete(self, key, cond=None, cond_values=None):
+        kw = {"Key": {"k": key}, "ReturnValues": "ALL_OLD"}
         if cond:
             kw["ConditionExpression"] = cond
+        if cond_values:
+            kw["ExpressionAttributeValues"] = cond_values
+        return "Attributes" in self._write(self.table.delete_item, key, **kw)
+
+    def _update(self, key, expr, values=None, names=None, cond=None, cond_values=None, ret="ALL_NEW"):
+        """An update of a live item (or a new one); cond must still hold, else _Conflict."""
+        kw = {"Key": {"k": key}, "UpdateExpression": expr, "ReturnValues": ret,
+              "ConditionExpression": f"({cond}) AND {LIVE}" if cond else LIVE,
+              "ExpressionAttributeValues": dict(values or {}, **(cond_values or {}), **{":now": _now()})}
+        if names:
+            kw["ExpressionAttributeNames"] = names
         try:
-            return self._count(self.table.update_item(**kw)).get("Attributes", {})
+            return self._write(self.table.update_item, key, **kw).get("Attributes", {})
         except ClientError as e:
-            code = e.response["Error"]["Code"]
-            if code == "ConditionalCheckFailedException":
-                raise ResponseError("WRONGTYPE Operation against a key holding the wrong kind of value") from None
-            if code == "ValidationException" and "operand" in str(e).lower():
+            if e.response["Error"]["Code"] == "ValidationException" and "operand" in str(e).lower():
                 raise ResponseError("ERR value is not an integer or out of range") from None
             raise
 
@@ -129,7 +162,7 @@ class Engine:
         """A live item of type t, None if missing; WRONGTYPE if it is something else."""
         item = self._get(key)
         if item is not None and item["t"] != t:
-            raise ResponseError("WRONGTYPE Operation against a key holding the wrong kind of value")
+            raise ResponseError(WRONGTYPE)
         return item
 
     def _type_cond(self, t):
@@ -142,12 +175,16 @@ class Engine:
         fn = getattr(self, "cmd_" + cmd.lower(), None)
         if fn is None:
             raise NotSupported(cmd.upper())
-        try:
-            return fn(*args)
-        except TypeError as e:
-            if "positional argument" in str(e) or "required" in str(e):
-                raise ResponseError(f"ERR wrong number of arguments for '{cmd.lower()}' command") from None
-            raise
+        for _attempt in range(RETRIES + 1):
+            try:
+                return fn(*args)
+            except _Conflict as c:   # another client changed the key between our read and write: start over
+                key = c.key
+            except TypeError as e:
+                if "positional argument" in str(e) or "required" in str(e):
+                    raise ResponseError(f"ERR wrong number of arguments for '{cmd.lower()}' command") from None
+                raise
+        raise ResponseError(f"ERR concurrent modification of key '{key}', retried {RETRIES} times")
 
     # ---------------- strings ----------------
 
