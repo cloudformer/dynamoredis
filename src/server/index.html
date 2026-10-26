@@ -168,7 +168,14 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 dialog h3 { margin-bottom: 15px; color: #1f2937; font-size: 17px; }
 dialog .form-grid { grid-template-columns: 1fr; }
 @media (max-width: 640px){ .container { padding: 20px; } body { padding: 16px; } }
-#keys td.key{cursor:pointer} #keys tr.sel td{background:#eef3ff} pre{white-space:pre-wrap;word-break:break-all}
+#keys{border:1px solid #dfe3e8;border-radius:8px;overflow:hidden;background:#fff}
+#keys .row{display:flex;align-items:center;gap:8px;height:40px;padding-right:14px;border-bottom:1px solid #eef0f3;cursor:pointer;font-size:14px;color:#2a3344;white-space:nowrap}
+#keys .row:hover{background:#f5f7fa} #keys .row.sel{background:#e9f0fb}
+#keys .chev{width:12px;color:#6b7482;font-size:16px;line-height:1} #keys .ico{display:flex;color:#5b6b85}
+#keys .name{flex:1;overflow:hidden;text-overflow:ellipsis} #keys .pct{width:48px;text-align:right;color:#6b7482}
+#keys .num{width:56px;text-align:right;color:#2a3344} #keys .key .name{font-family:Menlo,monospace;font-size:13px}
+#detail .empty{color:#6b7482;text-align:center;padding:80px 20px;border:1px solid #dfe3e8;border-radius:8px;background:#fff}
+pre{white-space:pre-wrap;word-break:break-all}
 </style>
 </head>
 <body>
@@ -199,7 +206,7 @@ dialog .form-grid { grid-template-columns: 1fr; }
   </div>
   <div id="main" style="display:grid;grid-template-columns:minmax(220px,1fr) 2fr;gap:16px">
     <div id="keys"></div>
-    <div id="detail"><div class="hint">pick a key</div></div>
+    <div id="detail"><div class="empty">Select a key from the list on the left to see its value</div></div>
   </div>
 </div>
 
@@ -307,6 +314,43 @@ async function run(){
 $('#run').onclick = run;
 $('#cmd').addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') run(); });
 
+const open = new Set();   // expanded namespaces ("user", "user:1" ...)
+function tree(keys){
+  // "a:b:c" -> nested folders by ":", like RedisInsight's browser; a key that is also a prefix keeps its leaf
+  const root = {children: {}, keys: []};
+  for (const k of keys){
+    const parts = k.split(':');
+    let node = root;
+    for (let i = 0; i < parts.length - 1; i++){
+      node = node.children[parts[i]] ||= {children: {}, keys: []};
+    }
+    node.keys.push(k);
+  }
+  return root;
+}
+function count(node){ return node.keys.length + Object.values(node.children).reduce((n, c) => n + count(c), 0); }
+const FOLDER = '<svg width="16" height="14" viewBox="0 0 16 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M1.5 3.5h4l1.5 1.5h7.5v7h-13z"/></svg>';
+const KEYICON = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="5" cy="5" r="3"/><path d="M7.2 7.2 12.5 12.5M10 10l1.5-1.5M11.5 11.5 13 10"/></svg>';
+function renderNode(node, prefix, depth, total){
+  let html = '';
+  for (const name of Object.keys(node.children).sort()){
+    const path = prefix ? prefix + ':' + name : name;
+    const child = node.children[name];
+    const isOpen = open.has(path);
+    const n = count(child);
+    const pct = total ? Math.round(100 * n / total) : 0;
+    html += `<div class="row ns" data-ns="${esc(path)}" style="padding-left:${12 + depth * 18}px">
+      <span class="chev">${isOpen ? '⌄' : '›'}</span><span class="ico">${FOLDER}</span><span class="name">${esc(name)}</span>
+      <span class="pct">${pct < 1 ? '<1' : pct}%</span><span class="num">${n}</span></div>`;
+    if (isOpen) html += renderNode(child, path, depth + 1, total);
+  }
+  for (const k of node.keys.sort()){
+    const leaf = k.split(':').pop();
+    html += `<div class="row key ${k === state.selected ? 'sel' : ''}" data-k="${esc(k)}" style="padding-left:${34 + depth * 18}px">
+      <span class="ico">${KEYICON}</span><span class="name">${esc(leaf)}</span></div>`;
+  }
+  return html;
+}
 async function loadKeys(reset){
   if (reset){ state.cursor = '0'; state.keys = []; }
   const q = new URLSearchParams({match: state.match ? state.match + (state.match.endsWith('*') ? '' : '*') : '*', cursor: state.cursor, count: 100});
@@ -314,10 +358,15 @@ async function loadKeys(reset){
   state.keys = state.keys.concat(d.keys); state.cursor = d.cursor;
   $('#more').hidden = state.cursor === '0';
   $('#count').textContent = `${state.keys.length} keys · ${d.cu} CU`;
-  $('#keys').innerHTML = `<table>` + (state.keys.length ? state.keys.map(k =>
-    `<tr class="${k === state.selected ? 'sel' : ''}"><td class="key" data-k="${esc(k)}">${esc(k)}</td></tr>`).join('') :
-    `<tr><td class="hint">no keys</td></tr>`) + `</table>`;
-  document.querySelectorAll('#keys td.key').forEach(td => td.onclick = () => loadKey(td.dataset.k));
+  $('#keys').innerHTML = state.keys.length ? renderNode(tree(state.keys), '', 0, state.keys.length) : '<div class="hint" style="padding:12px">no keys</div>';
+  bindKeys();
+}
+function bindKeys(){
+  document.querySelectorAll('#keys .ns').forEach(el => el.onclick = () => {
+    const ns = el.dataset.ns; open.has(ns) ? open.delete(ns) : open.add(ns);
+    $('#keys').innerHTML = renderNode(tree(state.keys), '', 0, state.keys.length); bindKeys();
+  });
+  document.querySelectorAll('#keys .key').forEach(el => el.onclick = () => loadKey(el.dataset.k));
 }
 $('#refresh').onclick = () => loadKeys(true);
 $('#more').onclick = () => loadKeys(false);
@@ -341,7 +390,7 @@ async function loadKey(k){
   $('#del').onclick = async () => {
     if (!(await dialog(`Delete ${k}?`, []))) return;
     await api('/api/cmd', {method: 'POST', body: JSON.stringify({cmd: 'DEL', args: [k]})});
-    log(`[${ts()}] DEL ${k}`, 'ok'); state.selected = null; $('#detail').innerHTML = '<div class="hint">pick a key</div>'; loadKeys(true);
+    log(`[${ts()}] DEL ${k}`, 'ok'); state.selected = null; $('#detail').innerHTML = '<div class="empty">Select a key from the list on the left to see its value</div>'; loadKeys(true);
   };
   loadKeys(true);
 }

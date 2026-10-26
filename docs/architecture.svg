@@ -1,40 +1,143 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 400" width="1100" height="400"
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 560" width="1100" height="560"
      font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
   <defs>
     <linearGradient id="gCompute" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#F58534"/><stop offset="1" stop-color="#C7511F"/>
     </linearGradient>
-    <linearGradient id="gStore" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#3B48CC"/><stop offset="1" stop-color="#2E3A9E"/>
+    <linearGradient id="gStorage" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6CAE3E"/><stop offset="1" stop-color="#3F8624"/>
     </linearGradient>
-    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
-      <path d="M0,0 L10,5 L0,10 z" fill="#555"/>
+    <linearGradient id="gConsole" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8C4FFF"/><stop offset="1" stop-color="#5B3BC8"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#CBD5E1"/>
     </marker>
+    <style>
+      .group  { fill: none; stroke: #94A3B8; stroke-width: 1.3; }
+      .gtitle { font-size: 15px; font-weight: 600; fill: #CBD5E1; }
+      .label  { font-size: 12.5px; font-weight: 600; fill: #F1F5F9; }
+      .sub    { font-size: 11px; fill: #94A3B8; }
+      .edge   { fill: none; stroke: #CBD5E1; stroke-width: 1.8; }
+      .callout      { fill: #F2443B; }
+      .callout-text { font-size: 12.5px; font-weight: 600; fill: #FFFFFF; }
+      .step   { font-size: 11.5px; fill: #E2E8F0; }
+      .glyph  { fill: none; stroke: #FFFFFF; stroke-width: 2.6; stroke-linejoin: round; stroke-linecap: round; }
+    </style>
   </defs>
-  <rect width="1100" height="400" fill="#ffffff"/>
-  <text x="550" y="42" text-anchor="middle" font-size="22" font-weight="600" fill="#222">dynamoredis — a truly serverless Redis</text>
 
-  <rect x="60" y="120" width="260" height="130" rx="12" fill="#f4f6f8" stroke="#c9d1d9"/>
-  <text x="190" y="162" text-anchor="middle" font-size="16" font-weight="600" fill="#222">your code</text>
-  <text x="190" y="190" text-anchor="middle" font-size="13" fill="#555" font-family="Menlo, monospace">from dynamoredis import redis</text>
-  <text x="190" y="212" text-anchor="middle" font-size="12" fill="#777">redis-py API · standard library only</text>
-  <text x="190" y="232" text-anchor="middle" font-size="12" fill="#777">or a browser: the console</text>
+  <rect width="1100" height="560" rx="18" fill="#0F172A"/>
 
-  <rect x="420" y="120" width="260" height="130" rx="12" fill="url(#gCompute)"/>
-  <text x="550" y="162" text-anchor="middle" font-size="16" font-weight="600" fill="#fff">Lambda Function URL</text>
-  <text x="550" y="190" text-anchor="middle" font-size="13" fill="#fff">HTTPS · Basic auth = user / password</text>
-  <text x="550" y="212" text-anchor="middle" font-size="12" fill="#ffe">redis command → DynamoDB call</text>
-  <text x="550" y="232" text-anchor="middle" font-size="12" fill="#ffe">GET / = RedisInsight-style console</text>
+  <!-- ====================== Compute ====================== -->
+  <rect x="40" y="56" width="260" height="330" rx="10" class="group" stroke-dasharray="6 5"/>
+  <text x="170" y="84" text-anchor="middle" class="gtitle">Compute</text>
 
-  <rect x="780" y="120" width="260" height="130" rx="12" fill="url(#gStore)"/>
-  <text x="910" y="162" text-anchor="middle" font-size="16" font-weight="600" fill="#fff">DynamoDB · one table</text>
-  <text x="910" y="190" text-anchor="middle" font-size="13" fill="#fff">k · type · value · exp (TTL)</text>
-  <text x="910" y="212" text-anchor="middle" font-size="12" fill="#eef">INCR = ADD · LPUSH = list_append</text>
-  <text x="910" y="232" text-anchor="middle" font-size="12" fill="#eef">pay per request · durable · multi-AZ</text>
+  <!-- EC2 -->
+  <g transform="translate(78,108)">
+    <rect width="70" height="70" rx="9" fill="url(#gCompute)"/>
+    <rect x="20" y="20" width="30" height="30" rx="3" class="glyph"/>
+    <path d="M27 20v-7 M35 20v-7 M43 20v-7 M27 50v7 M35 50v7 M43 50v7 M20 27h-7 M20 35h-7 M20 43h-7 M50 27h7 M50 35h7 M50 43h7" class="glyph" stroke-width="2"/>
+    <text x="35" y="90" text-anchor="middle" class="label">EC2</text>
+  </g>
+  <!-- ECS -->
+  <g transform="translate(192,108)">
+    <rect width="70" height="70" rx="9" fill="url(#gCompute)"/>
+    <path d="M35 12 L55 23.5 V46.5 L35 58 L15 46.5 V23.5 Z" class="glyph"/>
+    <rect x="26" y="29" width="8" height="8" fill="#FFFFFF"/><rect x="36" y="29" width="8" height="8" fill="#FFFFFF"/>
+    <rect x="26" y="39" width="8" height="8" fill="#FFFFFF"/><rect x="36" y="39" width="8" height="8" fill="#FFFFFF"/>
+    <text x="35" y="90" text-anchor="middle" class="label">ECS</text>
+  </g>
+  <!-- EKS -->
+  <g transform="translate(78,226)">
+    <rect width="70" height="70" rx="9" fill="url(#gCompute)"/>
+    <path d="M35 12 L55 23.5 V46.5 L35 58 L15 46.5 V23.5 Z" class="glyph"/>
+    <circle cx="35" cy="35" r="9" class="glyph"/>
+    <path d="M35 26v-6 M35 44v6 M26 35h-6 M44 35h6" class="glyph" stroke-width="2"/>
+    <text x="35" y="90" text-anchor="middle" class="label">EKS</text>
+  </g>
+  <!-- Lambda -->
+  <g transform="translate(192,226)">
+    <rect width="70" height="70" rx="9" fill="url(#gCompute)"/>
+    <text x="35" y="50" text-anchor="middle" font-size="40" font-weight="700" fill="#FFFFFF">λ</text>
+    <text x="35" y="90" text-anchor="middle" class="label">Lambda</text>
+  </g>
 
-  <line x1="320" y1="185" x2="412" y2="185" stroke="#555" stroke-width="2" marker-end="url(#arrow)"/>
-  <line x1="680" y1="185" x2="772" y2="185" stroke="#555" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="170" y="350" text-anchor="middle" class="sub">your code, anywhere it runs</text>
+  <text x="170" y="368" text-anchor="middle" class="sub"><tspan text-decoration="line-through" fill="#64748B">import redis</tspan>  →  <tspan fill="#F1F5F9" font-weight="600">from dynamoredis import redis</tspan></text>
 
-  <text x="550" y="310" text-anchor="middle" font-size="14" fill="#333">Idle: no instance, no node, no hourly charge — ≈ $0. Busy: per-request Lambda + DynamoDB pricing.</text>
-  <text x="550" y="350" text-anchor="middle" font-size="13" fill="#777">Part of Redefine AWS Serverless · github.com/topics/redefine-aws-serverless</text>
+  <!-- compute -> endpoint -->
+  <path d="M300 220 L 418 220" class="edge" marker-end="url(#arrow)"/>
+  <rect x="304" y="186" width="110" height="24" rx="5" class="callout"/>
+  <text x="359" y="203" text-anchor="middle" class="callout-text">1  HTTPS · redis-py</text>
+
+  <!-- browser (outside) -->
+  <g transform="translate(135,430)">
+    <rect width="70" height="52" rx="7" fill="#334155"/>
+    <rect x="6" y="6" width="58" height="8" rx="2" fill="#CBD5E1"/>
+    <circle cx="11" cy="10" r="2" fill="#F87171"/><circle cx="17" cy="10" r="2" fill="#FBBF24"/><circle cx="23" cy="10" r="2" fill="#34D399"/>
+    <rect x="6" y="18" width="58" height="28" rx="2" fill="#E2E8F0"/>
+    <rect x="11" y="23" width="26" height="4" rx="1.5" fill="#94A3B8"/><rect x="11" y="31" width="48" height="4" rx="1.5" fill="#CBD5E1"/><rect x="11" y="39" width="36" height="4" rx="1.5" fill="#CBD5E1"/>
+    <text x="35" y="70" text-anchor="middle" class="label">Browser</text>
+  </g>
+  <path d="M205 456 L 418 456" class="edge" marker-end="url(#arrow)"/>
+
+  <!-- ====================== s3rds ====================== -->
+  <rect x="360" y="40" width="700" height="490" rx="12" class="group" stroke="#CBD5E1" stroke-width="1.6"/>
+  <text x="380" y="70" class="gtitle" font-size="18" fill="#F8FAFC">dynamoredis: a serverless Redis</text>
+  <text x="380" y="88" class="sub">Lambda URL as the endpoint · one DynamoDB table · ≈ $0 when idle</text>
+
+  <!-- Backend -->
+  <rect x="400" y="110" width="400" height="230" rx="9" class="group"/>
+  <text x="600" y="134" text-anchor="middle" class="gtitle" font-size="13">Backend</text>
+
+  <g transform="translate(430,160)">
+    <rect width="86" height="86" rx="10" fill="url(#gCompute)"/>
+    <text x="43" y="62" text-anchor="middle" font-size="50" font-weight="700" fill="#FFFFFF">λ</text>
+    <text x="43" y="108" text-anchor="middle" class="label">Lambda: Endpoint</text>
+    <text x="43" y="124" text-anchor="middle" class="sub">user / password · command engine</text>
+  </g>
+
+  <g transform="translate(540,160)">
+    <rect width="22" height="22" rx="4" class="callout"/><text x="11" y="16" text-anchor="middle" class="callout-text">2</text>
+    <text x="30" y="16" class="step">redis command → one DynamoDB call</text>
+    <rect y="44" width="22" height="22" rx="4" class="callout"/><text x="11" y="60" text-anchor="middle" class="callout-text">3</text>
+    <text x="30" y="60" class="step">INCR = ADD · LPUSH = list_append</text>
+    <rect y="88" width="22" height="22" rx="4" class="callout"/><text x="11" y="104" text-anchor="middle" class="callout-text">4</text>
+    <text x="30" y="104" class="step">type check = condition (WRONGTYPE)</text>
+    <text x="30" y="120" class="step">exp checked on read · TTL sweeps later</text>
+  </g>
+
+  <!-- Storage -->
+  <rect x="830" y="110" width="200" height="230" rx="9" class="group"/>
+  <text x="930" y="134" text-anchor="middle" class="gtitle" font-size="13">Storage</text>
+  <g transform="translate(887,160)">
+    <rect width="86" height="86" rx="10" fill="url(#gStorage)"/>
+    <rect x="18" y="20" width="50" height="46" rx="5" class="glyph" stroke-width="3"/>
+    <path d="M18 35 h50 M18 50 h50 M35 20 v46" class="glyph" stroke-width="2.4"/>
+    <text x="43" y="108" text-anchor="middle" class="label">DynamoDB: Storage</text>
+    <text x="43" y="124" text-anchor="middle" class="sub">k · type · value · exp</text>
+    <text x="43" y="138" text-anchor="middle" class="sub">pay per request · TTL</text>
+    <text x="43" y="154" text-anchor="middle" class="sub">durable · multi-AZ</text>
+  </g>
+  <path d="M800 203 L 885 203" class="edge" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+
+  <!-- Web console (built-in) -->
+  <g transform="translate(430,392)">
+    <rect width="86" height="86" rx="10" fill="url(#gConsole)"/>
+    <rect x="13" y="16" width="60" height="8" rx="2" fill="#FFFFFF" opacity="0.95"/>
+    <rect x="13" y="29" width="60" height="42" rx="3" fill="#FFFFFF" opacity="0.22"/>
+    <rect x="18" y="35" width="50" height="4.5" rx="2" fill="#FFFFFF"/>
+    <rect x="18" y="44" width="50" height="4.5" rx="2" fill="#FFFFFF" opacity="0.7"/>
+    <rect x="18" y="53" width="50" height="4.5" rx="2" fill="#FFFFFF" opacity="0.7"/>
+    <rect x="18" y="62" width="30" height="4.5" rx="2" fill="#FFFFFF" opacity="0.7"/>
+    <text x="43" y="108" text-anchor="middle" class="label">Lambda: Web console</text>
+  </g>
+  <path d="M473 390 L 473 346" class="edge" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+  <text x="482" y="372" class="sub">same HTTP API</text>
+
+  <rect x="540" y="412" width="22" height="22" rx="4" class="callout"/><text x="551" y="428" text-anchor="middle" class="callout-text">5</text>
+  <text x="570" y="428" class="step">built-in console: keys by namespace, typed values, TTL, a command line,</text>
+  <text x="570" y="444" class="step">capacity units and server time per call — like RedisInsight, nothing to install</text>
+
+  <text x="710" y="512" text-anchor="middle" class="sub">atomic per key · no sessions · nothing runs between requests</text>
 </svg>
