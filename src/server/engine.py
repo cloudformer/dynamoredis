@@ -52,10 +52,14 @@ def _same(item):
     """Condition: the item is still exactly what was read (None: still absent)."""
     if item is None:
         return "attribute_not_exists(k)", {}
-    vals = {":st": item["t"], ":sv": item["v"]}
-    if "exp" in item:
-        vals[":se"] = item["exp"]
-    return "t = :st AND v = :sv AND " + ("exp = :se" if "exp" in item else "attribute_not_exists(exp)"), vals
+    conds, vals = [], {}
+    for a in ("t", "v", "exp"):
+        if a in item:
+            conds.append(f"{a} = :s{a}")
+            vals[f":s{a}"] = item[a]
+        else:
+            conds.append(f"attribute_not_exists({a})")
+    return " AND ".join(conds), vals
 
 
 def _now():
@@ -210,23 +214,36 @@ class Engine:
                 raise ResponseError("ERR syntax error")
         item = {"k": key, "t": "string", "v": _in(value)}
         exp = (_now() + ex) if ex else (_now() + (px + 999) // 1000) if px else None
-        if keepttl:
-            old = self._get(key)
-            if old and "exp" in old:
-                exp = int(old["exp"])
         if exp:
             item["exp"] = exp
-        kw = {"Item": item, "ReturnConsumedCapacity": "TOTAL"}
+        conds, vals = [], {":now": _now()}
         if nx:
-            kw["ConditionExpression"] = Attr("k").not_exists() | Attr("exp").lte(_now())
+            conds.append("(attribute_not_exists(k) OR exp <= :now)")
         elif xx:
-            kw["ConditionExpression"] = Attr("k").exists() & (Attr("exp").not_exists() | Attr("exp").gt(_now()))
-        try:
-            self._count(self.table.put_item(**kw))
-        except ClientError as e:
-            if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            conds.append("attribute_exists(k) AND " + LIVE)
+        if keepttl:
+            old = self._get(key)
+            if (nx and old is not None) or (xx and old is None):
                 return None
-            raise
+            # keep the TTL in place at the write: a concurrent EXPIRE / PERSIST makes this a _Conflict
+            if old is not None and "exp" in old:
+                item["exp"] = old["exp"]
+                conds.append("exp = :ke")
+                vals[":ke"] = old["exp"]
+            else:
+                conds.append("attribute_not_exists(exp)")
+        kw = {"Item": item}
+        if conds:
+            kw["ConditionExpression"] = " AND ".join(conds)
+            vals = {k: v for k, v in vals.items() if k in kw["ConditionExpression"]}
+            if vals:
+                kw["ExpressionAttributeValues"] = vals
+        try:
+            self._write(self.table.put_item, key, **kw)
+        except _Conflict:
+            if keepttl:
+                raise
+            return None
         return True
 
     def cmd_setex(self, key, seconds, value):
@@ -255,9 +272,16 @@ class Engine:
         return None if not old or ("exp" in old and old["exp"] <= now) else _out(old["v"])
 
     def cmd_getset(self, key, value):
-        old = self.cmd_get(key)
-        self.cmd_set(key, value)
-        return old
+        # one atomic put returning what it replaced; a live item of another type fails the condition and stays
+        now = _now()
+        try:
+            r = self._write(self.table.put_item, key, Item={"k": key, "t": "string", "v": _in(value)}, ReturnValues="ALL_OLD",
+                            ConditionExpression="attribute_not_exists(k) OR t = :t OR exp <= :now",
+                            ExpressionAttributeValues={":t": "string", ":now": now})
+        except _Conflict:
+            raise ResponseError(WRONGTYPE) from None
+        old = r.get("Attributes")
+        return None if not old or ("exp" in old and old["exp"] <= now) else _out(old["v"])
 
     def cmd_mget(self, *keys):
         return [self.cmd_get_or_none(k) for k in keys]
@@ -280,9 +304,14 @@ class Engine:
         return 0 if v is None else len(v["$b"] and base64.b64decode(v["$b"]) if isinstance(v, dict) else v.encode())
 
     def cmd_append(self, key, value):
-        old = self.cmd_get(key) or ""
+        item = self._typed(key, "string")
+        old = "" if item is None else _out(item["v"])
         new = (old if isinstance(old, str) else "") + str(value)
-        self.cmd_set(key, new)
+        put = {"k": key, "t": "string", "v": _in(new)}
+        if item is not None and "exp" in item:
+            put["exp"] = item["exp"]   # APPEND keeps the TTL, as in Redis
+        cond, vals = _same(item)      # only over what was read: a concurrent APPEND -> run again
+        self._write(self.table.put_item, key, Item=put, ConditionExpression=cond, **({"ExpressionAttributeValues": vals} if vals else {}))
         return len(new.encode())
 
     def _incr(self, key, n):
@@ -306,7 +335,12 @@ class Engine:
     # ---------------- keys ----------------
 
     def cmd_del(self, *keys):
-        return sum(1 for k in keys if self._get(k) is not None and self._delete(k))
+        # one delete per key, counted if what it removed was live
+        n = 0
+        for k in keys:
+            old = self._write(self.table.delete_item, k, Key={"k": k}, ReturnValues="ALL_OLD").get("Attributes")
+            n += bool(old) and ("exp" not in old or old["exp"] > _now())
+        return n
 
     def cmd_unlink(self, *keys):
         return self.cmd_del(*keys)
@@ -330,10 +364,8 @@ class Engine:
     def _expire_at(self, key, ts):
         if self._get(key) is None:
             return 0
-        try:
-            self._update(key, "SET exp = :e", {":e": ts}, cond="attribute_exists(k)")
-        except ResponseError:
-            return 0
+        # _update requires the item to be live: an item that expired meanwhile is never revived
+        self._update(key, "SET exp = :e", {":e": ts}, cond="attribute_exists(k)")
         return 1
 
     def cmd_ttl(self, key):
@@ -415,12 +447,18 @@ class Engine:
             kw["ExclusiveStartKey"] = r["LastEvaluatedKey"]
 
     def cmd_flushdb(self):
-        keys = self.cmd_keys("*")
-        with self.table.batch_writer() as b:
-            for k in keys:
-                b.delete_item(Key={"k": k})
-        self.cu += len(keys)
-        return True
+        # each item only if unchanged since the scan read it: a key written meanwhile came after the flush
+        kw = {"ConsistentRead": True, "ReturnConsumedCapacity": "TOTAL"}
+        while True:
+            r = self._count(self.table.scan(**kw))
+            for item in r.get("Items", []):
+                try:
+                    self._delete(item["k"], *_same(item))
+                except _Conflict:
+                    pass
+            if "LastEvaluatedKey" not in r:
+                return True
+            kw["ExclusiveStartKey"] = r["LastEvaluatedKey"]
 
     def cmd_flushall(self):
         return self.cmd_flushdb()
@@ -442,12 +480,16 @@ class Engine:
     def cmd_hset(self, key, *fv):
         if len(fv) % 2 or not fv:
             raise ResponseError("ERR wrong number of arguments for 'hset' command")
+        pairs = dict(zip(fv[::2], fv[1::2]))   # a field given twice: the last value wins, as in Redis
         before = self._fields(self._ensure(key, "hash", {}))
-        names = {f"#f{i}": fv[i * 2] for i in range(len(fv) // 2)}
-        vals = {f":v{i}": _in(fv[i * 2 + 1]) for i in range(len(fv) // 2)}
-        self._update(key, "SET " + ", ".join(f"v.#f{i} = :v{i}" for i in range(len(fv) // 2)), vals, names,
-                     cond="t = :t", cond_values={":t": "hash"})
-        return sum(1 for i in range(len(fv) // 2) if fv[i * 2] not in before)
+        names = {f"#f{i}": f for i, f in enumerate(pairs)}
+        vals = {f":v{i}": _in(v) for i, v in enumerate(pairs.values())}
+        # each field still exists / is still missing as read: the "added" count is exact, HSETNX never overwrites
+        cond = " AND ".join(["t = :t"] + [f"attribute_exists(v.#f{i})" if f in before else f"attribute_not_exists(v.#f{i})"
+                                          for i, f in enumerate(pairs)])
+        self._update(key, "SET " + ", ".join(f"v.#f{i} = :v{i}" for i in range(len(pairs))), vals, names,
+                     cond=cond, cond_values={":t": "hash"})
+        return sum(1 for f in pairs if f not in before)
 
     def cmd_hmset(self, key, *fv):
         self.cmd_hset(key, *fv)
@@ -493,9 +535,19 @@ class Engine:
             self._delete(key, *_same(item))   # Redis removes an empty hash; only if no field was added meanwhile
             return len(gone)
         names = {f"#f{i}": x for i, x in enumerate(gone)}
-        self._update(key, "REMOVE " + ", ".join(f"v.#f{i}" for i in range(len(gone))), names=names,
-                     cond="t = :t", cond_values={":t": "hash"})
+        cond = " AND ".join(["t = :t"] + [f"attribute_exists(v.#f{i})" for i in range(len(gone))])   # exact count
+        attrs = self._update(key, "REMOVE " + ", ".join(f"v.#f{i}" for i in range(len(gone))), names=names,
+                             cond=cond, cond_values={":t": "hash"})
+        self._drop_if_empty(key, attrs)
         return len(gone)
+
+    def _drop_if_empty(self, key, attrs):
+        """A concurrent removal may have emptied the container: Redis drops empty keys, so do we (if still empty)."""
+        if not attrs.get("v"):
+            try:
+                self._delete(key, *_same(attrs))
+            except _Conflict:
+                pass   # something was added meanwhile: the key is not empty any more
 
     def cmd_hincrby(self, key, field, n):
         self._ensure(key, "hash", {})
@@ -525,6 +577,8 @@ class Engine:
         else:
             expr = "SET t = :t, v = list_append(if_not_exists(v, :empty), :vals)"
         cond, cv = self._type_cond("list")
+        if only_existing:   # a key deleted since the read is not created again
+            cond = "attribute_exists(k) AND t = :t"
         attrs = self._update(key, expr, {":vals": vals, ":empty": []}, cond=cond, cond_values=cv)
         return len(attrs["v"])
 
@@ -587,7 +641,9 @@ class Engine:
         i = _int_arg(index)
         if not -len(lst) <= i < len(lst):
             raise ResponseError("ERR index out of range")
-        self._update(key, f"SET v[{i % len(lst)}] = :x", {":x": _in(value)}, cond="t = :t", cond_values={":t": "list"})
+        # the index refers to the list as read: a concurrent push / pop shifts it -> run again
+        cond, cv = _same(item)
+        self._update(key, f"SET v[{i % len(lst)}] = :x", {":x": _in(value)}, cond=cond, cond_values=cv)
         return True
 
     def cmd_ltrim(self, key, start, stop):
@@ -615,13 +671,12 @@ class Engine:
         return set(item["v"]) if item is not None and isinstance(item.get("v"), (set, frozenset)) else set()
 
     def cmd_sadd(self, key, *members):
-        before = self._set(self._typed(key, "set"))
-        new = {str(m) for m in members} - before
-        if not new:
-            return 0
+        self._typed(key, "set")   # purge an expired item, enforce the type
+        members = {str(m) for m in members}
+        # add every member, count against the item as it was just before: a concurrent SREM never makes us skip one
         cond, cv = self._type_cond("set")
-        self._update(key, "ADD v :m SET t = :t", {":m": new}, cond=cond, cond_values=cv)
-        return len(new)
+        old = self._update(key, "ADD v :m SET t = :t", {":m": members}, cond=cond, cond_values=cv, ret="ALL_OLD")
+        return len(members - self._set(old))
 
     def cmd_srem(self, key, *members):
         item = self._typed(key, "set")
@@ -632,7 +687,10 @@ class Engine:
         if gone == have:
             self._delete(key, *_same(item))   # only if no member was added meanwhile
         else:
-            self._update(key, "DELETE v :m", {":m": gone}, cond="t = :t", cond_values={":t": "set"})
+            vals = {f":m{i}": m for i, m in enumerate(sorted(gone))}
+            cond = " AND ".join(["t = :t"] + [f"contains(v, {p})" for p in vals])   # exact count
+            attrs = self._update(key, "DELETE v :m", {":m": gone}, cond=cond, cond_values=dict(vals, **{":t": "set"}))
+            self._drop_if_empty(key, attrs)
         return len(gone)
 
     def cmd_smembers(self, key):
@@ -659,8 +717,9 @@ class Engine:
             raise ResponseError("ERR syntax error")
         if opts["INCR"]:
             return self.cmd_zincrby(key, pairs[0], pairs[1])
-        before = self._fields(self._ensure(key, "zset", {}))
-        names, vals, sets = {}, {}, []
+        item = self._typed(key, "zset")
+        before = self._fields(item)
+        names, vals, sets, conds = {}, {}, [], ["t = :t"]
         changed = added = 0
         for j in range(0, len(pairs), 2):
             score, member = pairs[j], str(pairs[j + 1])
@@ -668,17 +727,26 @@ class Engine:
                 score = Decimal(str(float(score)))
             except ValueError:
                 raise ResponseError("ERR value is not a valid float") from None
+            # every decision below holds only while the member is as read (NX / XX / counts)
+            names[f"#m{j}"] = member
+            if member in before:
+                conds.append(f"v.#m{j} = :o{j}")
+                vals[f":o{j}"] = before[member]
+            else:
+                conds.append(f"attribute_not_exists(v.#m{j})")
             if (opts["NX"] and member in before) or (opts["XX"] and member not in before):
                 continue
             if member not in before:
                 added += 1
             if before.get(member) != score:
                 changed += 1
-            names[f"#m{j}"] = member
             vals[f":s{j}"] = score
             sets.append(f"v.#m{j} = :s{j}")
-        if sets:
-            self._update(key, "SET " + ", ".join(sets), vals, names, cond="t = :t", cond_values={":t": "zset"})
+        if not sets:
+            return 0
+        if item is None:
+            self._ensure(key, "zset", {})
+        self._update(key, "SET " + ", ".join(sets), vals, names, cond=" AND ".join(conds), cond_values={":t": "zset"})
         return changed if opts["CH"] else added
 
     def cmd_zincrby(self, key, increment, member):
@@ -707,8 +775,10 @@ class Engine:
             self._delete(key, *_same(item))   # only if no member was added meanwhile
         else:
             names = {f"#m{i}": m for i, m in enumerate(gone)}
-            self._update(key, "REMOVE " + ", ".join(f"v.#m{i}" for i in range(len(gone))), names=names,
-                         cond="t = :t", cond_values={":t": "zset"})
+            cond = " AND ".join(["t = :t"] + [f"attribute_exists(v.#m{i})" for i in range(len(gone))])   # exact count
+            attrs = self._update(key, "REMOVE " + ", ".join(f"v.#m{i}" for i in range(len(gone))), names=names,
+                                 cond=cond, cond_values={":t": "zset"})
+            self._drop_if_empty(key, attrs)
         return len(gone)
 
     def _zrange(self, key, start, stop, withscores, reverse):

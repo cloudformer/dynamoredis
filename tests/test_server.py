@@ -198,3 +198,100 @@ def test_gives_up_with_a_clear_error_after_retries(table, monkeypatch):
     status, data = cmd("LPOP", "l")
     assert status == 400 and data["error"] == "ERR concurrent modification of key 'l', retried 3 times"
     assert cmd("LRANGE", "l", 0, -1)[1]["result"] == ["a", "x", "x", "x", "x"]   # nothing popped, nothing lost
+
+
+def clock(monkeypatch):
+    """engine._now under the test's control; returns a function that moves it forward."""
+    t = [int(time.time())]
+    monkeypatch.setattr("engine._now", lambda: t[0])
+    return lambda seconds: t.__setitem__(0, t[0] + seconds)
+
+
+def test_getset_returns_what_it_replaced(table, monkeypatch):
+    cmd("SET", "k", "old")
+    interleave(table, monkeypatch, ("SET", "k", "new"))
+    assert cmd("GETSET", "k", "mine")[1]["result"] == "new"   # "new" is handed back, not silently overwritten
+    assert cmd("GET", "k")[1]["result"] == "mine"
+
+
+def test_append_keeps_a_concurrent_append_and_the_ttl(table, monkeypatch):
+    cmd("SET", "k", "a", "EX", 100)
+    interleave(table, monkeypatch, ("APPEND", "k", "b"))
+    assert cmd("APPEND", "k", "c")[1]["result"] == 3
+    assert cmd("GET", "k")[1]["result"] == "abc" and cmd("TTL", "k")[1]["result"] > 0
+
+
+def test_set_keepttl_keeps_a_concurrent_persist(table, monkeypatch):
+    cmd("SET", "k", "v", "EX", 100)
+    interleave(table, monkeypatch, ("PERSIST", "k"))
+    assert cmd("SET", "k", "w", "KEEPTTL")[1]["result"] is True
+    assert cmd("GET", "k")[1]["result"] == "w" and cmd("TTL", "k")[1]["result"] == -1
+
+
+def test_sadd_adds_a_member_removed_meanwhile(table, monkeypatch):
+    cmd("SADD", "s", "a")
+    interleave(table, monkeypatch, ("SREM", "s", "a"), at="read")   # SADD saw "a" already there
+    assert cmd("SADD", "s", "a")[1]["result"] == 1
+    assert cmd("SISMEMBER", "s", "a")[1]["result"] == 1
+
+
+def test_hsetnx_and_zadd_nx_never_overwrite(table, monkeypatch):
+    interleave(table, monkeypatch, ("HSET", "h", "f", "theirs"), ("ZADD", "z", 5, "m"))
+    assert cmd("HSETNX", "h", "f", "mine")[1]["result"] == 0
+    assert cmd("ZADD", "z", "NX", 1, "m")[1]["result"] == 0
+    assert cmd("HGET", "h", "f")[1]["result"] == "theirs" and cmd("ZSCORE", "z", "m")[1]["result"] == "5"
+
+
+def test_hset_counts_a_field_removed_meanwhile_as_added(table, monkeypatch):
+    cmd("HSET", "h", "a", "1", "b", "1")
+    interleave(table, monkeypatch, ("HDEL", "h", "a"))
+    assert cmd("HSET", "h", "a", "2")[1]["result"] == 1
+    assert cmd("HGETALL", "h")[1]["result"] == {"a": "2", "b": "1"}
+
+
+def test_lset_index_refers_to_the_current_list(table, monkeypatch):
+    cmd("RPUSH", "l", "a", "b")
+    interleave(table, monkeypatch, ("RPOP", "l"))
+    status, data = cmd("LSET", "l", 1, "x")
+    assert status == 400 and data["error"] == "ERR index out of range"
+    assert cmd("LRANGE", "l", 0, -1)[1]["result"] == ["a"]
+
+
+def test_pushx_does_not_recreate_a_deleted_key(table, monkeypatch):
+    cmd("RPUSH", "l", "a")
+    interleave(table, monkeypatch, ("DEL", "l"))
+    assert cmd("LPUSHX", "l", "x")[1]["result"] == 0
+    assert cmd("EXISTS", "l")[1]["result"] == 0
+
+
+def test_writes_never_land_in_an_item_that_just_expired(table, monkeypatch):
+    move = clock(monkeypatch)
+    cmd("SET", "k", "v", "EX", 10)
+    cmd("SET", "n", "5", "EX", 10)
+    interleave(table, monkeypatch, lambda: move(11), at="read")   # expires right after the read judged it live
+    assert cmd("EXPIRE", "k", 100)[1]["result"] == 0       # not revived
+    assert cmd("EXISTS", "k")[1]["result"] == 0
+    assert cmd("INCR", "n")[1]["result"] == 1              # counts from a fresh key, never into a dead one
+    assert cmd("GET", "n")[1]["result"] == "1"
+
+
+def test_persist_of_a_key_deleted_meanwhile_is_0(table, monkeypatch):
+    cmd("SET", "k", "v", "EX", 100)
+    interleave(table, monkeypatch, ("DEL", "k"))
+    assert cmd("PERSIST", "k")[1]["result"] == 0
+
+
+def test_removal_that_empties_a_key_concurrently_drops_it(table, monkeypatch):
+    cmd("SADD", "s", "a", "b")
+    cmd("HSET", "h", "a", "1", "b", "1")
+    interleave(table, monkeypatch, ("SREM", "s", "b"), ("HDEL", "h", "b"))
+    assert cmd("SREM", "s", "a")[1]["result"] == 1 and cmd("EXISTS", "s")[1]["result"] == 0
+    assert cmd("HDEL", "h", "a")[1]["result"] == 1 and cmd("EXISTS", "h")[1]["result"] == 0
+
+
+def test_flushdb_keeps_a_key_written_after_the_scan(table, monkeypatch):
+    cmd("SET", "a", "1")
+    cmd("SET", "b", "1")
+    interleave(table, monkeypatch, ("SET", "a", "2"), ("SET", "b", "2"))
+    assert cmd("FLUSHDB")[1]["result"] is True
+    assert cmd("MGET", "a", "b")[1]["result"] == ["2", "2"]
