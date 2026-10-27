@@ -4,6 +4,8 @@
 one DynamoDB table, a Lambda Function URL as the endpoint, ≈ $0 when idle.** The redis-py API, standard
 library only. Part of [Redefine AWS Serverless](https://github.com/topics/redefine-aws-serverless).
 
+![dynamoredis architecture](https://raw.githubusercontent.com/cloudformer/dynamoredis/main/docs/architecture.svg)
+
 ```bash
 pip install dynamoredis
 ```

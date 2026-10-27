@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2 — 2026-10-26
+
+The PyPI page shows the architecture image.
+
 ## 0.1.1 — 2026-10-26
 
 No data is lost when two clients change the same key at once. Commands that read first now write with a
