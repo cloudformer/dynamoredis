@@ -123,9 +123,10 @@ Run it yourself — the same commands CI runs on every push:
 
 ```bash
 python3 -m pip install pytest boto3 moto redis
-docker compose -f tests/compat/docker-compose.yml up -d redis
-REDIS_URL=redis://127.0.0.1:6379/0 python3 -m pytest tests -q      # writes tests/compat/REPORT.md
-docker compose -f tests/compat/docker-compose.yml down
+python3 -m pytest tests -q                 # leaves Docker alone: live if Redis is running, else the compat tests are skipped
+python3 -m pytest tests -q --docker up     # starts Redis in Docker, waits until healthy, tests; keeps it running
+python3 -m pytest tests -q --docker run    # the same, then stops it if all passed (on a failure it keeps running)
+python3 -m pytest tests -q --docker down   # the same, then stops it whatever the result
 COMPAT_DRY=1 python3 -m pytest tests/compat -q -s                  # no Docker: dynamoredis side only
 ```
 

@@ -28,6 +28,8 @@ os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
 from compat_report import (pytest_collection_modifyitems, pytest_configure,  # noqa: E402,F401
                            pytest_runtest_logreport, pytest_sessionfinish, pytest_terminal_summary)
 
+pytest_plugins = ["compat_docker"]   # python3 -m pytest tests -q [--docker up | run | down]
+
 
 @pytest.fixture
 def table():
