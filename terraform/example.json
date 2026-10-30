@@ -4,11 +4,10 @@
   "assume_role_arn": "",
 
   "env": "dev",
-  "name": "dynamoredis",
+  "project_name": "dynamoredis",
 
-  "user": "admin",
-  "password": "CHANGE-ME",
-
-  "endpoint_auth": "NONE",
-  "console": true
+  "console": true,
+  "function_url_auth": "NONE",
+  "function_url_user": "admin",
+  "function_url_password": "CHANGE-ME"
 }
