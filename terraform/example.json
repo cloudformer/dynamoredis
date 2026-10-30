@@ -8,6 +8,6 @@
 
   "console": true,
   "function_url_auth": "NONE",
-  "function_url_user": "admin",
-  "function_url_password": "CHANGE-ME"
+  "console_auth_username": "admin",
+  "console_auth_password": "CHANGE-ME"
 }

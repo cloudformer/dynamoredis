@@ -74,8 +74,8 @@ resource "aws_lambda_function" "server" {
   environment {
     variables = {
       TABLE     = aws_dynamodb_table.kv.name
-      USER_NAME = var.function_url_user
-      PASSWORD  = var.function_url_password
+      USER_NAME = var.console_auth_username
+      PASSWORD  = var.console_auth_password
       CONSOLE   = var.console ? "1" : "0"
     }
   }

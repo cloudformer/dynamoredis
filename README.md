@@ -39,7 +39,7 @@ deletes the item later. Durable the moment a command returns, multi-AZ, no node 
 **Terraform**
 
 ```bash
-cp terraform/example.json terraform/my.json      # set aws_profile, env, function_url_user, function_url_password
+cp terraform/example.json terraform/my.json      # set aws_profile, env, console_auth_username, console_auth_password
 terraform -chdir=terraform init
 terraform -chdir=terraform apply -var-file=my.json
 terraform -chdir=terraform output                 # console_url

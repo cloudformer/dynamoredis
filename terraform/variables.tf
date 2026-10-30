@@ -44,7 +44,7 @@ variable "console" {
 variable "function_url_auth" {
   description = <<-EOT
     How the Function URL is protected:
-      NONE    = public URL; only function_url_user/password (HTTP Basic) is checked      <- default
+      NONE    = public URL; only console_auth_username/password (HTTP Basic) is checked      <- default
       AWS_IAM = AWS checks a SigV4 signature + IAM permission first. The browser console
                 cannot sign requests, so it is unusable in this mode.
   EOT
@@ -57,13 +57,13 @@ variable "function_url_auth" {
   }
 }
 
-variable "function_url_user" {
-  description = "HTTP Basic user for the Function URL (console login and clients)"
+variable "console_auth_username" {
+  description = "HTTP Basic user: console login AND every API client; still required with console = false"
   type        = string
 }
 
-variable "function_url_password" {
-  description = "HTTP Basic password for the Function URL"
+variable "console_auth_password" {
+  description = "HTTP Basic password: console login AND every API client"
   type        = string
   sensitive   = true
 }

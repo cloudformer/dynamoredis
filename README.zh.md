@@ -36,7 +36,7 @@ dynamoredis 补上它：一个 Lambda 把 redis 命令翻译成 DynamoDB 调用�
 **Terraform**
 
 ```bash
-cp terraform/example.json terraform/my.json      # 改 aws_profile、env、function_url_user、function_url_password
+cp terraform/example.json terraform/my.json      # 改 aws_profile、env、console_auth_username、console_auth_password
 terraform -chdir=terraform init
 terraform -chdir=terraform apply -var-file=my.json
 terraform -chdir=terraform output                 # console_url
