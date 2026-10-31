@@ -2,7 +2,7 @@
 
 **Python client for [dynamoredis](https://github.com/cloudformer/dynamoredis) — a truly serverless Redis:
 one DynamoDB table, a Lambda Function URL as the endpoint, ≈ $0 when idle.** The redis-py API, standard
-library only. Part of [Redefine AWS Serverless](https://github.com/topics/redefine-aws-serverless).
+library only. Part of [IdleFree](https://cloudformer.github.io/).
 
 ![dynamoredis architecture](https://raw.githubusercontent.com/cloudformer/dynamoredis/main/docs/architecture.svg)
 

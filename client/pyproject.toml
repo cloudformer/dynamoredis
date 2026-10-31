@@ -22,6 +22,7 @@ dependencies = []  # standard library only
 
 [project.urls]
 Homepage = "https://github.com/cloudformer/dynamoredis"
+IdleFree = "https://cloudformer.github.io/"
 Repository = "https://github.com/cloudformer/dynamoredis"
 Deploy = "https://github.com/cloudformer/dynamoredis#quick-start"
 Compatibility = "https://github.com/cloudformer/dynamoredis/blob/main/tests/compat/REPORT.md"

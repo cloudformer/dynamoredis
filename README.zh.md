@@ -171,5 +171,4 @@ CI 每次 push 跑全部测试（含 Redis 对比）。发版就是打 tag：改
 
 ---
 
-**[Redefine AWS Serverless](https://github.com/topics/redefine-aws-serverless)** 系列之一——把空闲也计费的 AWS 服务，
-用空闲 ≈ $0 的原语重做一遍。MIT。
+**[IdleFree](https://cloudformer.github.io/#zh)** 系列之一 —— 把空闲也计费的 AWS 服务和自建应用，重建成空闲 ≈ $0。MIT。
