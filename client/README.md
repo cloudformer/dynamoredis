@@ -4,6 +4,8 @@
 one DynamoDB table, a Lambda Function URL as the endpoint, ≈ $0 when idle.** The redis-py API, standard
 library only. Part of [IdleFree](https://cloudformer.github.io/).
 
+![dynamoredis console](https://raw.githubusercontent.com/cloudformer/dynamoredis/main/docs/console.svg)
+
 ![dynamoredis architecture](https://raw.githubusercontent.com/cloudformer/dynamoredis/main/docs/architecture.svg)
 
 ```bash

@@ -6,6 +6,8 @@
 
 [中文](README.zh.md) · [compatibility report](tests/compat/REPORT.md) · [tasks](tests/compat/TASKS.md) · [changelog](CHANGELOG.md)
 
+![the console](docs/console.svg)
+
 ![architecture](docs/architecture.svg)
 
 | | ElastiCache Serverless (Redis) | dynamoredis |
